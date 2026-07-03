@@ -9,6 +9,11 @@ import android.graphics.Path;
 import android.graphics.PointF;
 import android.view.MotionEvent;
 import android.view.View;
+import com.example.bandsplitscanner.model.BoundaryPair;
+import com.example.bandsplitscanner.correction.BandCorrectionEngine;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import com.example.bandsplitscanner.model.PageCorners;
 
@@ -25,8 +30,10 @@ public class CornerEditView extends View {
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint pointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint activePointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint splitLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private PageCorners corners;
+    private List<BoundaryPair> boundaryPairs = new ArrayList<>();
     private int activeCornerIndex = -1;
 
     public CornerEditView(Context context, Bitmap bitmap) {
@@ -39,6 +46,10 @@ public class CornerEditView extends View {
         linePaint.setStyle(Paint.Style.STROKE);
         linePaint.setStrokeWidth(5f);
 
+        splitLinePaint.setColor(0xFF00FF99);
+        splitLinePaint.setStyle(Paint.Style.STROKE);
+        splitLinePaint.setStrokeWidth(4f);
+
         pointPaint.setColor(0xFF00AAFF);
         pointPaint.setStyle(Paint.Style.FILL);
 
@@ -46,6 +57,7 @@ public class CornerEditView extends View {
         activePointPaint.setStyle(Paint.Style.FILL);
 
         initDefaultCorners();
+        resetBoundaryPairsFromCorners();
     }
 
     private void initDefaultCorners() {
@@ -83,6 +95,7 @@ public class CornerEditView extends View {
         float[] points = getCornerPointsInView();
 
         drawCornerLines(canvas, points);
+        drawFixedSplitLines(canvas);
         drawCornerPoints(canvas, points);
     }
 
@@ -207,6 +220,8 @@ public class CornerEditView extends View {
 
         target.x = imageX;
         target.y = imageY;
+
+        resetBoundaryPairsFromCorners();
     }
 
     private PointF getCornerByIndex(int index) {
@@ -226,5 +241,50 @@ public class CornerEditView extends View {
 
     private float clamp(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private void drawFixedSplitLines(Canvas canvas) {
+        for (BoundaryPair pair : boundaryPairs) {
+            PointF topInView = mapImagePointToView(pair.inputTop);
+            PointF bottomInView = mapImagePointToView(pair.inputBottom);
+
+            canvas.drawLine(
+                    topInView.x,
+                    topInView.y,
+                    bottomInView.x,
+                    bottomInView.y,
+                    splitLinePaint
+            );
+
+            canvas.drawCircle(topInView.x, topInView.y, 10f, splitLinePaint);
+            canvas.drawCircle(bottomInView.x, bottomInView.y, 10f, splitLinePaint);
+        }
+    }
+
+    private PointF mapImagePointToView(PointF point) {
+        float[] values = new float[]{point.x, point.y};
+        imageToViewMatrix.mapPoints(values);
+        return new PointF(values[0], values[1]);
+    }
+
+    private PointF lerp(PointF a, PointF b, float t) {
+        return new PointF(
+                a.x + (b.x - a.x) * t,
+                a.y + (b.y - a.y) * t
+        );
+    }
+
+    public List<BoundaryPair> getBoundaryPairs() {
+        List<BoundaryPair> copied = new ArrayList<>();
+
+        for (BoundaryPair pair : boundaryPairs) {
+            copied.add(pair.copy());
+        }
+
+        return copied;
+    }
+
+    private void resetBoundaryPairsFromCorners() {
+        boundaryPairs = BandCorrectionEngine.createDefaultBoundaryPairs(corners);
     }
 }

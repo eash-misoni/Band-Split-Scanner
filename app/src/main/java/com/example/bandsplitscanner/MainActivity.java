@@ -17,10 +17,12 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import com.example.bandsplitscanner.correction.BandCorrectionEngine;
-import com.example.bandsplitscanner.correction.BandRenderer;
 import com.example.bandsplitscanner.correction.ScanlineBandRenderer;
 import com.example.bandsplitscanner.model.PageCorners;
 import com.example.bandsplitscanner.view.CornerEditView;
+import com.example.bandsplitscanner.model.BoundaryPair;
+
+import java.util.List;
 
 import java.io.InputStream;
 
@@ -114,14 +116,16 @@ public class MainActivity extends AppCompatActivity {
         }
 
         PageCorners corners = cornerEditView.getPageCorners();
+        List<BoundaryPair> boundaryPairs = cornerEditView.getBoundaryPairs();
 
         BandCorrectionEngine engine = new BandCorrectionEngine(
                 new ScanlineBandRenderer()
         );
 
-        correctedBitmap = engine.createFixedThreeBandResult(
+        correctedBitmap = engine.createResult(
                 sourceBitmap,
                 corners,
+                boundaryPairs,
                 1200
         );
 

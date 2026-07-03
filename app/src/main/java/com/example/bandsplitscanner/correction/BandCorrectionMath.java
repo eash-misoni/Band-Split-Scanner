@@ -32,7 +32,7 @@ public class BandCorrectionMath {
                 left.inputBottom
         );
 
-        return Math.abs(area) > 10f;
+        return Math.abs(area) > 1f;
     }
 
     public static float polygonArea(PointF a, PointF b, PointF c, PointF d) {
