@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.Toast;
 
 import androidx.activity.EdgeToEdge;
@@ -20,6 +19,7 @@ import com.example.bandsplitscanner.correction.BandCorrectionEngine;
 import com.example.bandsplitscanner.correction.ScanlineBandRenderer;
 import com.example.bandsplitscanner.model.PageCorners;
 import com.example.bandsplitscanner.view.CornerEditView;
+import com.example.bandsplitscanner.view.ResultPreviewView;
 import com.example.bandsplitscanner.model.BoundaryPair;
 
 import java.util.List;
@@ -133,19 +133,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showResultView() {
-        if (correctedBitmap == null) {
+        if (correctedBitmap == null || cornerEditView == null) {
             return;
         }
 
         imageContainer.removeAllViews();
 
-        ImageView resultImageView = new ImageView(this);
-        resultImageView.setImageBitmap(correctedBitmap);
-        resultImageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        resultImageView.setAdjustViewBounds(true);
+        ResultPreviewView resultPreviewView = new ResultPreviewView(this);
+        resultPreviewView.setBitmap(correctedBitmap);
+        resultPreviewView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
+        resultPreviewView.setShowOutputBoundaryLines(true);
 
         imageContainer.addView(
-                resultImageView,
+                resultPreviewView,
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT
