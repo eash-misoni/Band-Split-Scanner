@@ -480,6 +480,18 @@ public class CornerEditView extends View {
         return copied;
     }
 
+    public void setBoundaryPairs(List<BoundaryPair> boundaryPairs) {
+        this.boundaryPairs = new ArrayList<>();
+
+        if (boundaryPairs != null) {
+            for (BoundaryPair pair : boundaryPairs) {
+                this.boundaryPairs.add(pair.copy());
+            }
+        }
+
+        invalidate();
+    }
+
     private void resetBoundaryPairsFromCorners() {
         boundaryPairs = BandCorrectionEngine.createDefaultBoundaryPairs(corners);
     }

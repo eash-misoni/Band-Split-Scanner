@@ -1,5 +1,6 @@
 package com.example.bandsplitscanner;
 
+import android.view.View;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
@@ -20,6 +21,7 @@ import com.example.bandsplitscanner.correction.ScanlineBandRenderer;
 import com.example.bandsplitscanner.model.PageCorners;
 import com.example.bandsplitscanner.view.CornerEditView;
 import com.example.bandsplitscanner.view.ResultPreviewView;
+import com.example.bandsplitscanner.view.WidthDistributionBarView;
 import com.example.bandsplitscanner.model.BoundaryPair;
 
 import java.util.List;
@@ -37,6 +39,10 @@ public class MainActivity extends AppCompatActivity {
     private Bitmap correctedBitmap;
 
     private CornerEditView cornerEditView;
+    private WidthDistributionBarView widthDistributionBarView;
+    private ResultPreviewView resultPreviewView;
+
+    private boolean showingResult = false;
 
     private final ActivityResultLauncher<String> imagePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -92,27 +98,56 @@ public class MainActivity extends AppCompatActivity {
                 showCornerEditView();
             }
         });
+
+        widthDistributionBarView = findViewById(R.id.widthDistributionBarView);
+        widthDistributionBarView.setOnBoundaryPairsChangedListener(
+                new WidthDistributionBarView.OnBoundaryPairsChangedListener() {
+                    @Override
+                    public void onBoundaryPairsChanged(List<BoundaryPair> boundaryPairs, boolean isFinished) {
+                        applyBoundaryPairsFromWidthBar(boundaryPairs);
+
+                        if (showingResult && isFinished) {
+                            regenerateResultPreview();
+                        }
+                    }
+                }
+        );
     }
 
     private void showCornerEditView() {
-        imageContainer.removeAllViews();
+            imageContainer.removeAllViews();
 
-        imageContainer.addView(
-                cornerEditView,
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                )
-        );
+            imageContainer.addView(
+                    cornerEditView,
+                    new FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+            );
 
-        correctButton.setEnabled(true);
-        backButton.setEnabled(false);
-    }
+            resultPreviewView = null;
+            showingResult = false;
+
+            widthDistributionBarView.setVisibility(View.VISIBLE);
+            widthDistributionBarView.setEnabled(true);
+            widthDistributionBarView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
+
+            correctButton.setEnabled(true);
+            backButton.setEnabled(false);
+        }
 
     private void createCorrectionResult() {
+        if (!generateCorrectedBitmap()) {
+            return;
+        }
+
+        showResultView();
+    }
+
+    private boolean generateCorrectedBitmap() {
         if (sourceBitmap == null || cornerEditView == null) {
             Toast.makeText(this, "先に画像を選択してください", Toast.LENGTH_SHORT).show();
-            return;
+            return false;
         }
 
         PageCorners corners = cornerEditView.getPageCorners();
@@ -129,7 +164,7 @@ public class MainActivity extends AppCompatActivity {
                 1200
         );
 
-        showResultView();
+        return true;
     }
 
     private void showResultView() {
@@ -139,7 +174,7 @@ public class MainActivity extends AppCompatActivity {
 
         imageContainer.removeAllViews();
 
-        ResultPreviewView resultPreviewView = new ResultPreviewView(this);
+        resultPreviewView = new ResultPreviewView(this);
         resultPreviewView.setBitmap(correctedBitmap);
         resultPreviewView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
         resultPreviewView.setShowOutputBoundaryLines(true);
@@ -152,7 +187,36 @@ public class MainActivity extends AppCompatActivity {
                 )
         );
 
+        showingResult = true;
+
+        widthDistributionBarView.setVisibility(View.VISIBLE);
+        widthDistributionBarView.setEnabled(true);
+        widthDistributionBarView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
+
         correctButton.setEnabled(false);
         backButton.setEnabled(true);
     }
+
+    private void regenerateResultPreview() {
+        if (!generateCorrectedBitmap()) {
+            return;
+        }
+
+        if (resultPreviewView != null) {
+            resultPreviewView.setBitmap(correctedBitmap);
+            resultPreviewView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
+        }
+    }
+
+    private void applyBoundaryPairsFromWidthBar(List<BoundaryPair> boundaryPairs) {
+        if (cornerEditView != null) {
+            cornerEditView.setBoundaryPairs(boundaryPairs);
+        }
+
+        if (resultPreviewView != null) {
+            resultPreviewView.setBoundaryPairs(boundaryPairs);
+        }
+    }
+
+
 }
