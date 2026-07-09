@@ -7,6 +7,7 @@ import android.view.MotionEvent;
 import android.view.View;
 
 import com.example.bandsplitscanner.model.BoundaryPair;
+import com.example.bandsplitscanner.model.BoundaryMarker;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -15,8 +16,12 @@ import java.util.List;
 
 public class WidthDistributionBarView extends View {
 
-    public interface OnBoundaryPairsChangedListener {
-        void onBoundaryPairsChanged(List<BoundaryPair> boundaryPairs, boolean isFinished);
+    public interface OnBoundaryOutputChangedListener {
+        void onBoundaryOutputChanged(
+                long boundaryId,
+                float outputX,
+                boolean isFinished
+        );
     }
 
     private static final float HIT_RADIUS = 48f;
@@ -28,10 +33,10 @@ public class WidthDistributionBarView extends View {
     private final Paint activeMarkerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint endPointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private List<BoundaryPair> boundaryPairs = new ArrayList<>();
+    private List<BoundaryMarker> markers = new ArrayList<>();
 
     private int activeMarkerIndex = -1;
-    private OnBoundaryPairsChangedListener listener;
+    private OnBoundaryOutputChangedListener listener;
 
     public WidthDistributionBarView(Context context) {
         super(context);
@@ -63,17 +68,24 @@ public class WidthDistributionBarView extends View {
         endPointPaint.setStyle(Paint.Style.FILL);
     }
 
-    public void setBoundaryPairs(List<BoundaryPair> boundaryPairs) {
-        this.boundaryPairs = copyAndSort(boundaryPairs);
+    public void setMarkersFromBoundaryPair(List<BoundaryPair> boundaryPairs) {
+        List<BoundaryMarker> markers = new ArrayList<>();
+        if (boundaryPairs != null) {
+            for (BoundaryPair pair : boundaryPairs) {
+                markers.add(BoundaryMarker.fromBoundaryPair(pair));
+            }
+        }
+
+        this.markers = copyAndSort(markers);
         activeMarkerIndex = -1;
         invalidate();
     }
 
-    public List<BoundaryPair> getBoundaryPairs() {
-        return copyAndSort(boundaryPairs);
+    public List<BoundaryMarker> getBoundaryMarkers() {
+        return copyAndSort(markers);
     }
 
-    public void setOnBoundaryPairsChangedListener(OnBoundaryPairsChangedListener listener) {
+    public void setOnMarkersChangedListener(OnBoundaryOutputChangedListener listener) {
         this.listener = listener;
     }
 
@@ -90,9 +102,9 @@ public class WidthDistributionBarView extends View {
         canvas.drawCircle(startX, centerY, 8f, endPointPaint);
         canvas.drawCircle(endX, centerY, 8f, endPointPaint);
 
-        for (int i = 0; i < boundaryPairs.size(); i++) {
-            BoundaryPair pair = boundaryPairs.get(i);
-            float markerX = outputXToViewX(pair.outputX);
+        for (int i = 0; i < markers.size(); i++) {
+            BoundaryMarker marker = markers.get(i);
+            float markerX = outputXToViewX(marker.outputX);
 
             Paint paint = i == activeMarkerIndex ? activeMarkerPaint : markerPaint;
             canvas.drawCircle(markerX, centerY, MARKER_RADIUS, paint);
@@ -138,8 +150,8 @@ public class WidthDistributionBarView extends View {
     private int findTouchedMarker(float viewX, float viewY) {
         float centerY = getHeight() / 2f;
 
-        for (int i = 0; i < boundaryPairs.size(); i++) {
-            float markerX = outputXToViewX(boundaryPairs.get(i).outputX);
+        for (int i = 0; i < markers.size(); i++) {
+            float markerX = outputXToViewX(markers.get(i).outputX);
 
             float dx = viewX - markerX;
             float dy = viewY - centerY;
@@ -154,7 +166,7 @@ public class WidthDistributionBarView extends View {
     }
 
     private void moveActiveMarker(float viewX) {
-        if (activeMarkerIndex < 0 || activeMarkerIndex >= boundaryPairs.size()) {
+        if (activeMarkerIndex < 0 || activeMarkerIndex >= markers.size()) {
             return;
         }
 
@@ -162,20 +174,21 @@ public class WidthDistributionBarView extends View {
 
         float min = activeMarkerIndex == 0
                 ? MIN_GAP
-                : boundaryPairs.get(activeMarkerIndex - 1).outputX + MIN_GAP;
+                : markers.get(activeMarkerIndex - 1).outputX + MIN_GAP;
 
-        float max = activeMarkerIndex == boundaryPairs.size() - 1
+        float max = activeMarkerIndex == markers.size() - 1
                 ? 1f - MIN_GAP
-                : boundaryPairs.get(activeMarkerIndex + 1).outputX - MIN_GAP;
+                : markers.get(activeMarkerIndex + 1).outputX - MIN_GAP;
 
         newOutputX = clamp(newOutputX, min, max);
 
-        boundaryPairs.get(activeMarkerIndex).outputX = newOutputX;
+        markers.get(activeMarkerIndex).outputX = newOutputX;
     }
 
     private void notifyChanged(boolean isFinished) {
         if (listener != null) {
-            listener.onBoundaryPairsChanged(getBoundaryPairs(), isFinished);
+            BoundaryMarker marker = markers.get(activeMarkerIndex);
+            listener.onBoundaryOutputChanged(marker.boundaryId, marker.outputX, isFinished);
         }
     }
 
@@ -204,18 +217,18 @@ public class WidthDistributionBarView extends View {
         return getWidth() - getPaddingRight() - 32f;
     }
 
-    private List<BoundaryPair> copyAndSort(List<BoundaryPair> source) {
-        List<BoundaryPair> copied = new ArrayList<>();
+    private List<BoundaryMarker> copyAndSort(List<BoundaryMarker> source) {
+        List<BoundaryMarker> copied = new ArrayList<>();
 
         if (source != null) {
-            for (BoundaryPair pair : source) {
-                copied.add(pair.copy());
+            for (BoundaryMarker marker : source) {
+                copied.add(marker.copy());
             }
         }
 
-        Collections.sort(copied, new Comparator<BoundaryPair>() {
+        Collections.sort(copied, new Comparator<BoundaryMarker>() {
             @Override
-            public int compare(BoundaryPair a, BoundaryPair b) {
+            public int compare(BoundaryMarker a, BoundaryMarker b) {
                 return Float.compare(a.outputX, b.outputX);
             }
         });

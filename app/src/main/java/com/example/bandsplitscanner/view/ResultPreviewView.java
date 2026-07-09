@@ -66,6 +66,23 @@ public class ResultPreviewView extends View {
         invalidate();
     }
 
+    public void applyOutputXFromWidthBar(long boundaryId, float outputX) {
+        BoundaryPair pair = getBoundaryPairById(boundaryId);
+        if (pair != null) {
+            pair.outputX = outputX;
+        }
+    }
+
+    private BoundaryPair getBoundaryPairById(long boundaryId) {
+        for (BoundaryPair pair : boundaryPairs) {
+            if (pair.id == boundaryId) {
+                return pair;
+            }
+        }
+        return null;
+    }
+
+
     public void setShowOutputBoundaryLines(boolean showOutputBoundaryLines) {
         this.showOutputBoundaryLines = showOutputBoundaryLines;
         invalidate();

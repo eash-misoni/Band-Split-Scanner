@@ -491,6 +491,21 @@ public class CornerEditView extends View {
 
         invalidate();
     }
+    public void applyOutputXFromWidthBar(long boundaryId, float outputX) {
+        BoundaryPair pair = getBoundaryPairById(boundaryId);
+        if (pair != null) {
+            pair.outputX = outputX;
+        }
+    }
+
+    private BoundaryPair getBoundaryPairById(long boundaryId) {
+        for (BoundaryPair pair : boundaryPairs) {
+            if (pair.id == boundaryId) {
+                return pair;
+            }
+        }
+        return null;
+    }
 
     private void resetBoundaryPairsFromCorners() {
         boundaryPairs = BandCorrectionEngine.createDefaultBoundaryPairs(corners);

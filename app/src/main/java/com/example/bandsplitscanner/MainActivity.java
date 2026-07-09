@@ -100,11 +100,11 @@ public class MainActivity extends AppCompatActivity {
         });
 
         widthDistributionBarView = findViewById(R.id.widthDistributionBarView);
-        widthDistributionBarView.setOnBoundaryPairsChangedListener(
-                new WidthDistributionBarView.OnBoundaryPairsChangedListener() {
+        widthDistributionBarView.setOnMarkersChangedListener(
+                new WidthDistributionBarView.OnBoundaryOutputChangedListener() {
                     @Override
-                    public void onBoundaryPairsChanged(List<BoundaryPair> boundaryPairs, boolean isFinished) {
-                        applyBoundaryPairsFromWidthBar(boundaryPairs);
+                    public void onBoundaryOutputChanged(long boundaryId, float outputX, boolean isFinished) {
+                        applyOutputXFromWidthBar(boundaryId, outputX);
 
                         if (showingResult && isFinished) {
                             regenerateResultPreview();
@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
 
             widthDistributionBarView.setVisibility(View.VISIBLE);
             widthDistributionBarView.setEnabled(true);
-            widthDistributionBarView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
+            widthDistributionBarView.setMarkersFromBoundaryPair(cornerEditView.getBoundaryPairs());
 
             correctButton.setEnabled(true);
             backButton.setEnabled(false);
@@ -191,7 +191,7 @@ public class MainActivity extends AppCompatActivity {
 
         widthDistributionBarView.setVisibility(View.VISIBLE);
         widthDistributionBarView.setEnabled(true);
-        widthDistributionBarView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
+        widthDistributionBarView.setMarkersFromBoundaryPair(cornerEditView.getBoundaryPairs());
 
         correctButton.setEnabled(false);
         backButton.setEnabled(true);
@@ -208,13 +208,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void applyBoundaryPairsFromWidthBar(List<BoundaryPair> boundaryPairs) {
+    private void applyOutputXFromWidthBar(long boundaryId, float outputX) {
         if (cornerEditView != null) {
-            cornerEditView.setBoundaryPairs(boundaryPairs);
+            cornerEditView.applyOutputXFromWidthBar(boundaryId, outputX);
         }
 
         if (resultPreviewView != null) {
-            resultPreviewView.setBoundaryPairs(boundaryPairs);
+            resultPreviewView.applyOutputXFromWidthBar(boundaryId, outputX);
         }
     }
 
