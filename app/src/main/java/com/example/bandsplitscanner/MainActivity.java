@@ -23,6 +23,8 @@ import com.example.bandsplitscanner.view.CornerEditView;
 import com.example.bandsplitscanner.view.ResultPreviewView;
 import com.example.bandsplitscanner.view.WidthDistributionBarView;
 import com.example.bandsplitscanner.model.BoundaryPair;
+import com.example.bandsplitscanner.model.BoundaryMarker;
+
 
 import java.util.List;
 
@@ -100,11 +102,11 @@ public class MainActivity extends AppCompatActivity {
         });
 
         widthDistributionBarView = findViewById(R.id.widthDistributionBarView);
-        widthDistributionBarView.setOnMarkersChangedListener(
+        widthDistributionBarView.setOnBoundaryOutputChangedListener(
                 new WidthDistributionBarView.OnBoundaryOutputChangedListener() {
                     @Override
-                    public void onBoundaryOutputChanged(long boundaryId, float outputX, boolean isFinished) {
-                        applyOutputXFromWidthBar(boundaryId, outputX);
+                    public void onBoundaryOutputChanged(BoundaryMarker marker, boolean isFinished) {
+                        applyOutputXFromWidthBar(marker);
 
                         if (showingResult && isFinished) {
                             regenerateResultPreview();
@@ -130,7 +132,7 @@ public class MainActivity extends AppCompatActivity {
 
             widthDistributionBarView.setVisibility(View.VISIBLE);
             widthDistributionBarView.setEnabled(true);
-            widthDistributionBarView.setMarkersFromBoundaryPair(cornerEditView.getBoundaryPairs());
+            widthDistributionBarView.setMarkersFromBoundaryPairs(cornerEditView.getBoundaryPairs());
 
             correctButton.setEnabled(true);
             backButton.setEnabled(false);
@@ -191,7 +193,7 @@ public class MainActivity extends AppCompatActivity {
 
         widthDistributionBarView.setVisibility(View.VISIBLE);
         widthDistributionBarView.setEnabled(true);
-        widthDistributionBarView.setMarkersFromBoundaryPair(cornerEditView.getBoundaryPairs());
+        widthDistributionBarView.setMarkersFromBoundaryPairs(cornerEditView.getBoundaryPairs());
 
         correctButton.setEnabled(false);
         backButton.setEnabled(true);
@@ -208,13 +210,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void applyOutputXFromWidthBar(long boundaryId, float outputX) {
+    private void applyOutputXFromWidthBar(BoundaryMarker marker) {
         if (cornerEditView != null) {
-            cornerEditView.applyOutputXFromWidthBar(boundaryId, outputX);
+            cornerEditView.applyOutputXFromWidthBar(marker);
         }
 
         if (resultPreviewView != null) {
-            resultPreviewView.applyOutputXFromWidthBar(boundaryId, outputX);
+            resultPreviewView.applyOutputXFromWidthBar(marker);
         }
     }
 

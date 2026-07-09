@@ -9,6 +9,8 @@ import android.graphics.Path;
 import android.graphics.PointF;
 import android.view.MotionEvent;
 import android.view.View;
+
+import com.example.bandsplitscanner.model.BoundaryMarker;
 import com.example.bandsplitscanner.model.BoundaryPair;
 import com.example.bandsplitscanner.correction.BandCorrectionEngine;
 
@@ -491,7 +493,9 @@ public class CornerEditView extends View {
 
         invalidate();
     }
-    public void applyOutputXFromWidthBar(long boundaryId, float outputX) {
+    public void applyOutputXFromWidthBar(BoundaryMarker marker) {
+        long boundaryId = marker.boundaryId;
+        float outputX = marker.outputX;
         BoundaryPair pair = getBoundaryPairById(boundaryId);
         if (pair != null) {
             pair.outputX = outputX;

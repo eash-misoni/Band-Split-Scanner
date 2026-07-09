@@ -9,6 +9,7 @@ import android.graphics.PointF;
 import android.util.AttributeSet;
 import android.view.View;
 
+import com.example.bandsplitscanner.model.BoundaryMarker;
 import com.example.bandsplitscanner.model.BoundaryPair;
 
 import java.util.ArrayList;
@@ -66,10 +67,14 @@ public class ResultPreviewView extends View {
         invalidate();
     }
 
-    public void applyOutputXFromWidthBar(long boundaryId, float outputX) {
+    public void applyOutputXFromWidthBar(BoundaryMarker marker) {
+        long boundaryId = marker.boundaryId;
+        float outputX = marker.outputX;
         BoundaryPair pair = getBoundaryPairById(boundaryId);
+
         if (pair != null) {
             pair.outputX = outputX;
+            invalidate();
         }
     }
 

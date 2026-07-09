@@ -18,8 +18,7 @@ public class WidthDistributionBarView extends View {
 
     public interface OnBoundaryOutputChangedListener {
         void onBoundaryOutputChanged(
-                long boundaryId,
-                float outputX,
+                BoundaryMarker marker,
                 boolean isFinished
         );
     }
@@ -68,7 +67,7 @@ public class WidthDistributionBarView extends View {
         endPointPaint.setStyle(Paint.Style.FILL);
     }
 
-    public void setMarkersFromBoundaryPair(List<BoundaryPair> boundaryPairs) {
+    public void setMarkersFromBoundaryPairs(List<BoundaryPair> boundaryPairs) {
         List<BoundaryMarker> markers = new ArrayList<>();
         if (boundaryPairs != null) {
             for (BoundaryPair pair : boundaryPairs) {
@@ -85,7 +84,7 @@ public class WidthDistributionBarView extends View {
         return copyAndSort(markers);
     }
 
-    public void setOnMarkersChangedListener(OnBoundaryOutputChangedListener listener) {
+    public void setOnBoundaryOutputChangedListener(OnBoundaryOutputChangedListener listener) {
         this.listener = listener;
     }
 
@@ -188,7 +187,7 @@ public class WidthDistributionBarView extends View {
     private void notifyChanged(boolean isFinished) {
         if (listener != null) {
             BoundaryMarker marker = markers.get(activeMarkerIndex);
-            listener.onBoundaryOutputChanged(marker.boundaryId, marker.outputX, isFinished);
+            listener.onBoundaryOutputChanged(marker, isFinished);
         }
     }
 
