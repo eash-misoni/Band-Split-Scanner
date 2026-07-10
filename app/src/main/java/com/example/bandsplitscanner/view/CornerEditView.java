@@ -29,6 +29,8 @@ public class CornerEditView extends View {
     private static final int DRAG_SPLIT_TOP = 2;
     private static final int DRAG_SPLIT_BOTTOM = 3;
     private static final int DRAG_SPLIT_LINE = 4;
+    private static final int DRAG_LEFT_BOUNDARY = 5;
+    private static final int DRAG_RIGHT_BOUNDARY = 6;
 
     private final Bitmap bitmap;
 
@@ -268,6 +270,11 @@ public class CornerEditView extends View {
             return;
         }
 
+        if (findTouchedSideBoundary(viewX, viewY)) {
+            lastImageTouchPoint = mapViewPointToImage(viewX, viewY);
+            return;
+        }
+
         if (findTouchedSplitLine(viewX, viewY)) {
             lastImageTouchPoint = mapViewPointToImage(viewX, viewY);
         }
@@ -279,7 +286,14 @@ public class CornerEditView extends View {
             return;
         }
 
-        if (activeBoundaryIndex < 0 || activeBoundaryIndex >= boundaryPairs.size()) {
+        if (dragMode == DRAG_LEFT_BOUNDARY
+                || dragMode == DRAG_RIGHT_BOUNDARY) {
+            moveActiveSideBoundary(viewX, viewY);
+            return;
+        }
+
+        if (activeBoundaryIndex < 0
+                || activeBoundaryIndex >= boundaryPairs.size()) {
             return;
         }
 
@@ -326,6 +340,44 @@ public class CornerEditView extends View {
                 dragMode = DRAG_SPLIT_BOTTOM;
                 return true;
             }
+        }
+
+        return false;
+    }
+
+    private boolean findTouchedSideBoundary(float viewX, float viewY) {
+        PointF topLeft = mapImagePointToView(corners.topLeft);
+        PointF bottomLeft = mapImagePointToView(corners.bottomLeft);
+
+        float leftDistance = pointToSegmentDistance(
+                viewX,
+                viewY,
+                topLeft.x,
+                topLeft.y,
+                bottomLeft.x,
+                bottomLeft.y
+        );
+
+        if (leftDistance <= LINE_HIT_RADIUS) {
+            dragMode = DRAG_LEFT_BOUNDARY;
+            return true;
+        }
+
+        PointF topRight = mapImagePointToView(corners.topRight);
+        PointF bottomRight = mapImagePointToView(corners.bottomRight);
+
+        float rightDistance = pointToSegmentDistance(
+                viewX,
+                viewY,
+                topRight.x,
+                topRight.y,
+                bottomRight.x,
+                bottomRight.y
+        );
+
+        if (rightDistance <= LINE_HIT_RADIUS) {
+            dragMode = DRAG_RIGHT_BOUNDARY;
+            return true;
         }
 
         return false;
@@ -386,11 +438,12 @@ public class CornerEditView extends View {
 
         BoundaryPair pair = boundaryPairs.get(activeBoundaryIndex);
 
-        pair.inputTop.x = clamp(pair.inputTop.x + dx, 0f, bitmap.getWidth());
-        pair.inputTop.y = clamp(pair.inputTop.y + dy, 0f, bitmap.getHeight());
-
-        pair.inputBottom.x = clamp(pair.inputBottom.x + dx, 0f, bitmap.getWidth());
-        pair.inputBottom.y = clamp(pair.inputBottom.y + dy, 0f, bitmap.getHeight());
+        movePointPair(
+                pair.inputTop,
+                pair.inputBottom,
+                dx,
+                dy
+        );
 
         lastImageTouchPoint = currentImagePoint;
     }
@@ -428,6 +481,69 @@ public class CornerEditView extends View {
 
         target.x = imageX;
         target.y = imageY;
+    }
+
+    private void movePointPair(
+            PointF first,
+            PointF second,
+            float dx,
+            float dy
+    ) {
+        float minDx = Math.max(
+                -first.x,
+                -second.x
+        );
+
+        float maxDx = Math.min(
+                bitmap.getWidth() - first.x,
+                bitmap.getWidth() - second.x
+        );
+
+        float minDy = Math.max(
+                -first.y,
+                -second.y
+        );
+
+        float maxDy = Math.min(
+                bitmap.getHeight() - first.y,
+                bitmap.getHeight() - second.y
+        );
+
+        float actualDx = clamp(dx, minDx, maxDx);
+        float actualDy = clamp(dy, minDy, maxDy);
+
+        first.x += actualDx;
+        first.y += actualDy;
+
+        second.x += actualDx;
+        second.y += actualDy;
+    }
+
+    private void moveActiveSideBoundary(float viewX, float viewY) {
+        if (lastImageTouchPoint == null) {
+            lastImageTouchPoint = mapViewPointToImage(viewX, viewY);
+            return;
+        }
+
+        PointF currentImagePoint = mapViewPointToImage(viewX, viewY);
+
+        float dx = currentImagePoint.x - lastImageTouchPoint.x;
+        float dy = currentImagePoint.y - lastImageTouchPoint.y;
+
+        PointF top;
+        PointF bottom;
+
+        if (dragMode == DRAG_LEFT_BOUNDARY) {
+            top = corners.topLeft;
+            bottom = corners.bottomLeft;
+        } else {
+            top = corners.topRight;
+            bottom = corners.bottomRight;
+        }
+
+        movePointPair(top, bottom, dx, dy);
+
+        lastImageTouchPoint = currentImagePoint;
     }
 
     private PointF getCornerByIndex(int index) {
