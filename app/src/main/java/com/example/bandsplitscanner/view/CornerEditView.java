@@ -112,8 +112,8 @@ public class CornerEditView extends View {
 
         float[] points = getCornerPointsInView();
 
-        drawCornerLines(canvas, points);
-        drawFixedSplitLines(canvas);
+        drawBandFrameLines(canvas);
+        drawSplitLines(canvas);
         drawCornerPoints(canvas, points);
     }
 
@@ -155,14 +155,66 @@ public class CornerEditView extends View {
         return points;
     }
 
-    private void drawCornerLines(Canvas canvas, float[] points) {
+    private void drawBandFrameLines(Canvas canvas) {
+        PointF topLeft = mapImagePointToView(corners.topLeft);
+        PointF topRight = mapImagePointToView(corners.topRight);
+        PointF bottomLeft = mapImagePointToView(corners.bottomLeft);
+        PointF bottomRight = mapImagePointToView(corners.bottomRight);
+
+        drawTopEndpointConnections(canvas, topLeft, topRight);
+        drawBottomEndpointConnections(canvas, bottomLeft, bottomRight);
+
+        canvas.drawLine(
+                topLeft.x,
+                topLeft.y,
+                bottomLeft.x,
+                bottomLeft.y,
+                linePaint
+        );
+
+        canvas.drawLine(
+                topRight.x,
+                topRight.y,
+                bottomRight.x,
+                bottomRight.y,
+                linePaint
+        );
+    }
+
+    private void drawTopEndpointConnections(
+            Canvas canvas,
+            PointF topLeft,
+            PointF topRight
+    ) {
         Path path = new Path();
 
-        path.moveTo(points[0], points[1]);
-        path.lineTo(points[2], points[3]);
-        path.lineTo(points[4], points[5]);
-        path.lineTo(points[6], points[7]);
-        path.close();
+        path.moveTo(topLeft.x, topLeft.y);
+
+        for (BoundaryPair pair : boundaryPairs) {
+            PointF point = mapImagePointToView(pair.inputTop);
+            path.lineTo(point.x, point.y);
+        }
+
+        path.lineTo(topRight.x, topRight.y);
+
+        canvas.drawPath(path, linePaint);
+    }
+
+    private void drawBottomEndpointConnections(
+            Canvas canvas,
+            PointF bottomLeft,
+            PointF bottomRight
+    ) {
+        Path path = new Path();
+
+        path.moveTo(bottomLeft.x, bottomLeft.y);
+
+        for (BoundaryPair pair : boundaryPairs) {
+            PointF point = mapImagePointToView(pair.inputBottom);
+            path.lineTo(point.x, point.y);
+        }
+
+        path.lineTo(bottomRight.x, bottomRight.y);
 
         canvas.drawPath(path, linePaint);
     }
@@ -399,7 +451,7 @@ public class CornerEditView extends View {
         return Math.max(min, Math.min(max, value));
     }
 
-    private void drawFixedSplitLines(Canvas canvas) {
+    private void drawSplitLines(Canvas canvas) {
         for (int i = 0; i < boundaryPairs.size(); i++) {
             BoundaryPair pair = boundaryPairs.get(i);
 
