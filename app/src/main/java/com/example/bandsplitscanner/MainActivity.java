@@ -123,6 +123,11 @@ public class MainActivity extends AppCompatActivity {
         widthDistributionBarView.setOnBoundaryAddRequestedListener(
                 this::addBoundaryAtOutputX
         );
+
+        widthDistributionBarView
+                .setOnBoundaryDeleteRequestedListener(
+                        this::deleteBoundary
+                );
     }
 
     private void showCornerEditView() {
@@ -316,6 +321,38 @@ public class MainActivity extends AppCompatActivity {
                         b.outputX
                 )
         );
+
+        cornerEditView.setBoundaryPairs(boundaryPairs);
+
+        widthDistributionBarView
+                .setMarkersFromBoundaryPairs(boundaryPairs);
+
+        if (showingResult) {
+            regenerateResultPreview();
+        }
+    }
+
+    private void deleteBoundary(long boundaryId) {
+        if (cornerEditView == null) {
+            return;
+        }
+
+        List<BoundaryPair> boundaryPairs =
+                cornerEditView.getBoundaryPairs();
+
+        boolean removed = false;
+
+        for (int i = 0; i < boundaryPairs.size(); i++) {
+            if (boundaryPairs.get(i).id == boundaryId) {
+                boundaryPairs.remove(i);
+                removed = true;
+                break;
+            }
+        }
+
+        if (!removed) {
+            return;
+        }
 
         cornerEditView.setBoundaryPairs(boundaryPairs);
 

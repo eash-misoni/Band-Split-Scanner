@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">BandSplitScanner</string>
     <string name="add_boundary_here">ここに境界を追加</string>
+    <string name="delete_boundary">削除</string>
 </resources>

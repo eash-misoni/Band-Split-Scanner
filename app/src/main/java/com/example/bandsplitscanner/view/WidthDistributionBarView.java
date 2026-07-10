@@ -33,6 +33,10 @@ public class WidthDistributionBarView extends View {
         void onBoundaryAddRequested(float outputX);
     }
 
+    public interface OnBoundaryDeleteRequestedListener {
+        void onBoundaryDeleteRequested(long boundaryId);
+    }
+
     private static final float HIT_RADIUS = 48f;
     private static final float MARKER_RADIUS = 16f;
     private static final float MIN_GAP = 0.03f;
@@ -50,6 +54,9 @@ public class WidthDistributionBarView extends View {
 
     private OnBoundaryOutputChangedListener listener;
     private OnBoundaryAddRequestedListener addRequestedListener;
+    private OnBoundaryDeleteRequestedListener deleteRequestedListener;
+
+    private boolean longPressHandled = false;
 
     public WidthDistributionBarView(Context context) {
         super(context);
@@ -91,6 +98,25 @@ public class WidthDistributionBarView extends View {
                     @Override
                     public void onLongPress(MotionEvent e) {
                         if (activeMarkerIndex != -1) {
+                            if (activeMarkerIndex >= markers.size()) {
+                                return;
+                            }
+
+                            longPressHandled = true;
+
+                            long boundaryId =
+                                    markers.get(activeMarkerIndex).boundaryId;
+
+                            performHapticFeedback(
+                                    HapticFeedbackConstants.LONG_PRESS
+                            );
+
+                            showDeleteBoundaryMenu(
+                                    boundaryId,
+                                    e.getX(),
+                                    e.getY()
+                            );
+
                             return;
                         }
 
@@ -103,6 +129,8 @@ public class WidthDistributionBarView extends View {
                         if (!canAddMarkerAt(outputX)) {
                             return;
                         }
+
+                        longPressHandled = true;
 
                         performHapticFeedback(
                                 HapticFeedbackConstants.LONG_PRESS
@@ -145,10 +173,82 @@ public class WidthDistributionBarView extends View {
             float touchX,
             float touchY
     ) {
+        PopupMenu popupMenu =
+                createPopupMenuAt(touchX, touchY);
+
+        if (popupMenu == null) {
+            return;
+        }
+
+        popupMenu.getMenu().add(
+                R.string.add_boundary_here
+        );
+
+        popupMenu.setOnMenuItemClickListener(item -> {
+            if (addRequestedListener == null) {
+                return false;
+            }
+
+            addRequestedListener
+                    .onBoundaryAddRequested(outputX);
+
+            return true;
+        });
+
+        popupMenu.show();
+    }
+
+    public void setMarkersFromBoundaryPairs(List<BoundaryPair> boundaryPairs) {
+        List<BoundaryMarker> markers = new ArrayList<>();
+        if (boundaryPairs != null) {
+            for (BoundaryPair pair : boundaryPairs) {
+                markers.add(BoundaryMarker.fromBoundaryPair(pair));
+            }
+        }
+
+        this.markers = copyAndSort(markers);
+        activeMarkerIndex = -1;
+        invalidate();
+    }
+
+    private void showDeleteBoundaryMenu(
+            long boundaryId,
+            float touchX,
+            float touchY
+    ) {
+        PopupMenu popupMenu =
+                createPopupMenuAt(touchX, touchY);
+
+        if (popupMenu == null) {
+            return;
+        }
+
+        popupMenu.getMenu().add(
+                R.string.delete_boundary
+        );
+
+        popupMenu.setOnMenuItemClickListener(item -> {
+            if (deleteRequestedListener == null) {
+                return false;
+            }
+
+            deleteRequestedListener
+                    .onBoundaryDeleteRequested(boundaryId);
+
+            return true;
+        });
+
+        popupMenu.show();
+    }
+
+    private PopupMenu createPopupMenuAt(
+            float touchX,
+            float touchY
+    ) {
         View rootView = getRootView();
 
         if (!(rootView instanceof ViewGroup)) {
-            return;
+            return null;
         }
 
         ViewGroup root = (ViewGroup) rootView;
@@ -182,42 +282,14 @@ public class WidthDistributionBarView extends View {
 
         root.getOverlay().add(anchor);
 
-        PopupMenu popupMenu = new PopupMenu(
-                getContext(),
-                anchor
-        );
-
-        popupMenu.getMenu().add(
-                R.string.add_boundary_here
-        );
-
-        popupMenu.setOnMenuItemClickListener(item -> {
-            if (addRequestedListener == null) {
-                return false;
-            }
-
-            addRequestedListener.onBoundaryAddRequested(outputX);
-            return true;
-        });
+        PopupMenu popupMenu =
+                new PopupMenu(getContext(), anchor);
 
         popupMenu.setOnDismissListener(menu -> {
             root.getOverlay().remove(anchor);
         });
 
-        popupMenu.show();
-    }
-
-    public void setMarkersFromBoundaryPairs(List<BoundaryPair> boundaryPairs) {
-        List<BoundaryMarker> markers = new ArrayList<>();
-        if (boundaryPairs != null) {
-            for (BoundaryPair pair : boundaryPairs) {
-                markers.add(BoundaryMarker.fromBoundaryPair(pair));
-            }
-        }
-
-        this.markers = copyAndSort(markers);
-        activeMarkerIndex = -1;
-        invalidate();
+        return popupMenu;
     }
 
     public List<BoundaryMarker> getBoundaryMarkers() {
@@ -229,6 +301,9 @@ public class WidthDistributionBarView extends View {
     }
     public void setOnBoundaryAddRequestedListener(OnBoundaryAddRequestedListener listener) {
         this.addRequestedListener = listener;
+    }
+    public void setOnBoundaryDeleteRequestedListener(OnBoundaryDeleteRequestedListener listener) {
+        this.deleteRequestedListener = listener;
     }
 
     @Override
@@ -259,18 +334,27 @@ public class WidthDistributionBarView extends View {
             return false;
         }
 
+        if (event.getActionMasked()
+                == MotionEvent.ACTION_DOWN) {
+            longPressHandled = false;
+        }
+
         gestureDetector.onTouchEvent(event);
 
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 activeMarkerIndex =
-                        findTouchedMarker(event.getX(), event.getY());
+                        findTouchedMarker(
+                                event.getX(),
+                                event.getY()
+                        );
 
                 invalidate();
                 return true;
 
             case MotionEvent.ACTION_MOVE:
-                if (activeMarkerIndex != -1) {
+                if (activeMarkerIndex != -1
+                        && !longPressHandled) {
                     moveActiveMarker(event.getX());
                     notifyChanged(false);
                     invalidate();
@@ -280,14 +364,16 @@ public class WidthDistributionBarView extends View {
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
-                if (activeMarkerIndex != -1) {
+                if (activeMarkerIndex != -1
+                        && !longPressHandled) {
                     moveActiveMarker(event.getX());
                     notifyChanged(true);
                 }
 
                 activeMarkerIndex = -1;
-                invalidate();
+                longPressHandled = false;
 
+                invalidate();
                 return true;
 
             default:
