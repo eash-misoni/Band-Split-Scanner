@@ -142,12 +142,26 @@ com.example.bandsplitscanner
 - 表示Viewを切り替える
 - WidthDistributionBarViewの変更イベントを受け取る
 - 対応するoutputXを編集状態へ反映する
+- 境界追加要求を受け取る
+- 新しいBoundaryPairを生成する
+- 境界削除要求を受け取る
+- boundaryIdに対応するBoundaryPairを削除する
+- CornerEditViewとWidthDistributionBarViewを再同期する
 - BandCorrectionEngineを呼び出す
 - 補正結果をResultPreviewViewへ設定する
 - ドラッグ終了時に補正プレビューを再生成する
 ```
 
-現段階では状態同期の中心である。
+境界追加時には、新しい `outputX` の左右に隣接する境界を求め、入力側の上端点と下端点をそれぞれ線形補間して、新しい `BoundaryPair` を生成する。
+
+左右端境界は、追加位置探索と補間計算において次の仮想的な出力位置を持つ境界として扱う。
+
+```text
+左端境界 = outputX 0.0
+右端境界 = outputX 1.0
+```
+
+現段階では `MainActivity` が状態同期と境界追加・削除のオーケストレーションを担当する。
 
 ただし、本格MVPではMainActivityを薄くし、状態保持と画面ごとの処理をViewModelとFragmentへ移す。
 
@@ -182,7 +196,7 @@ com.example.bandsplitscanner
 
 ### 5.3 WidthDistributionBarView
 
-`WidthDistributionBarView` は、出力境界位置の編集専用Viewである。
+`WidthDistributionBarView` は、出力境界位置の編集と、境界追加・削除操作の入力受付を担当するViewである。
 
 責務は以下。
 
@@ -194,6 +208,11 @@ com.example.bandsplitscanner
 - outputX更新
 - 境界順序制約
 - 最小間隔制約
+- 長押しジェスチャの判定
+- 空き領域と既存マーカーの判別
+- 長押し位置付近へのコンテキストメニュー表示
+- 境界追加要求イベント通知
+- 境界削除要求イベント通知
 - outputX変更イベント通知
 ```
 
@@ -210,15 +229,42 @@ BoundaryMarker
 これにより、幅配分バーは入力座標を知らない。
 
 ```text
-WidthDistributionBarViewが変更してよい状態
-= outputX
+WidthDistributionBarViewが直接変更してよい状態
+= BoundaryMarker.outputX
 
-WidthDistributionBarViewが変更してはいけない状態
-= inputTop
-= inputBottom
+WidthDistributionBarViewが直接変更してはいけない状態
+= BoundaryPair.inputTop
+= BoundaryPair.inputBottom
+= BoundaryPair一覧そのもの
 ```
 
-この制約は、入力境界位置の巻き戻りを防ぐための重要な設計ルールである。
+境界追加時、Viewは新しい `BoundaryPair` を生成しない。
+
+```text
+WidthDistributionBarView
+↓
+onBoundaryAddRequested(outputX)
+↓
+MainActivity
+↓
+BoundaryPair生成
+```
+
+境界削除時も、View内部のマーカーだけを先に削除しない。
+
+```text
+WidthDistributionBarView
+↓
+onBoundaryDeleteRequested(boundaryId)
+↓
+MainActivity
+↓
+BoundaryPair削除
+↓
+最新BoundaryPair一覧からBoundaryMarkerを再同期
+```
+
+この制約により、境界状態の部分的な不整合を防ぐ。
 
 ---
 
@@ -443,7 +489,94 @@ MainActivity
 
 ---
 
-### 7.4 補正結果生成
+### 7.4 境界追加
+
+```text
+ユーザーが幅配分バーの空き領域を長押し
+↓
+WidthDistributionBarView
+↓
+長押し位置付近にコンテキストメニュー表示
+↓
+「ここに境界を追加」
+↓
+onBoundaryAddRequested(outputX)
+↓
+MainActivity
+↓
+既存BoundaryPairをoutputX順に確認
+↓
+追加位置の左右に隣接する境界を取得
+↓
+隣接境界間の補間比率tを計算
+↓
+inputTop / inputBottomを線形補間
+↓
+新しいBoundaryPairを生成
+↓
+BoundaryPair一覧へ追加してoutputX順に整列
+↓
+CornerEditViewへ反映
+↓
+WidthDistributionBarViewへBoundaryMarkerを再同期
+↓
+必要に応じて補正結果を再生成
+```
+
+補間比率は次の通り。
+
+```text
+t =
+    (newOutputX - leftOutputX)
+    /
+    (rightOutputX - leftOutputX)
+```
+
+入力境界位置は次のように生成する。
+
+```text
+newInputTop =
+    lerp(leftInputTop, rightInputTop, t)
+
+newInputBottom =
+    lerp(leftInputBottom, rightInputBottom, t)
+```
+
+内部境界が存在しない側では、ページの左端境界を `outputX = 0.0`、右端境界を `outputX = 1.0` として使用する。
+
+---
+
+### 7.5 境界削除
+
+```text
+ユーザーが境界マーカーを長押し
+↓
+WidthDistributionBarView
+↓
+長押し位置付近にコンテキストメニュー表示
+↓
+「削除」
+↓
+onBoundaryDeleteRequested(boundaryId)
+↓
+MainActivity
+↓
+boundaryIdに対応するBoundaryPairを削除
+↓
+CornerEditViewへ反映
+↓
+WidthDistributionBarViewへBoundaryMarkerを再同期
+↓
+必要に応じて補正結果を再生成
+```
+
+削除時には、残存する他の境界の `outputX`、`inputTop`、`inputBottom` を変更しない。
+
+削除された境界の左右に存在していた境界が新しく隣接し、その間が1つの補正帯として扱われる。
+
+---
+
+### 7.6 補正結果生成
 
 ```text
 MainActivity
@@ -465,7 +598,7 @@ ResultPreviewView
 
 ---
 
-### 7.5 補正結果画面での幅調整
+### 7.7 補正結果画面での幅調整
 
 ```text
 境界マーカーをドラッグ
@@ -798,9 +931,11 @@ View同士を直接同期元にしない。
 
 現在のMainActivity中心構成を維持したまま、MVP操作を完成させる。
 
+境界追加・削除は実装済み。
+
+残る主な作業は以下。
+
 ```text
-- 境界追加
-- 境界削除
 - ズーム
 - パン
 - 出力境界線表示切り替え
@@ -990,10 +1125,12 @@ View座標は端末サイズ、向き、ズーム、パンで変化する。
 - 入力境界と出力境界をBoundaryPairで対応付けられる
 - 幅配分バーの状態をBoundaryMarkerへ限定できている
 - 境界IDによる部分更新が導入されている
+- 境界追加・削除をIDベースのイベント経路で同期できている
+- 境界追加時に隣接入力境界間の局所補間を行える
 - 元画像座標とView座標を分離している
 - 補正画像と表示オーバーレイを分離している
 ```
 
 今後の大きな設計課題は、MainActivityとCornerEditViewに集中している状態管理を、機能拡張のタイミングで段階的に外へ出すことである。
 
-現段階では、最終構成への一括リファクタリングより、境界追加・削除、ズーム・パン、出力外枠、保存といったMVP機能を検証しながら、必要な単位で責務分離を進める。
+現段階では、最終構成への一括リファクタリングより、ズーム・パン、出力外枠、保存といった残りのMVP機能を検証しながら、必要な単位で責務分離を進める。
