@@ -428,8 +428,6 @@ public class CornerEditView extends View {
 
         target.x = imageX;
         target.y = imageY;
-
-        resetBoundaryPairsFromCorners();
     }
 
     private PointF getCornerByIndex(int index) {
