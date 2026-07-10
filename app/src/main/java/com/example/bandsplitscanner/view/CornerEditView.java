@@ -12,7 +12,6 @@ import android.view.View;
 
 import com.example.bandsplitscanner.model.BoundaryMarker;
 import com.example.bandsplitscanner.model.BoundaryPair;
-import com.example.bandsplitscanner.correction.BandCorrectionEngine;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -77,7 +76,6 @@ public class CornerEditView extends View {
         activeSplitLinePaint.setStrokeWidth(6f);
 
         initDefaultCorners();
-        resetBoundaryPairsFromCorners();
     }
 
     private void initDefaultCorners() {
@@ -675,9 +673,5 @@ public class CornerEditView extends View {
             }
         }
         return null;
-    }
-
-    private void resetBoundaryPairsFromCorners() {
-        boundaryPairs = BandCorrectionEngine.createDefaultBoundaryPairs(corners);
     }
 }

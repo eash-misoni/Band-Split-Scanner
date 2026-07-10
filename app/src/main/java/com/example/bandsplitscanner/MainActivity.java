@@ -3,6 +3,7 @@ package com.example.bandsplitscanner;
 import android.view.View;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.PointF;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -24,6 +25,7 @@ import com.example.bandsplitscanner.view.ResultPreviewView;
 import com.example.bandsplitscanner.view.WidthDistributionBarView;
 import com.example.bandsplitscanner.model.BoundaryPair;
 import com.example.bandsplitscanner.model.BoundaryMarker;
+import com.example.bandsplitscanner.correction.BandCorrectionMath;
 
 
 import java.util.List;
@@ -46,6 +48,8 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean showingResult = false;
 
+    private long nextBoundaryId = 1L;
+
     private final ActivityResultLauncher<String> imagePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
                 if (uri == null) {
@@ -61,6 +65,7 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
 
+                    nextBoundaryId = 1L;
                     cornerEditView = new CornerEditView(this, sourceBitmap);
                     showCornerEditView();
 
@@ -113,6 +118,10 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 }
+        );
+
+        widthDistributionBarView.setOnBoundaryAddRequestedListener(
+                this::addBoundaryAtOutputX
         );
     }
 
@@ -220,5 +229,101 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void addBoundaryAtOutputX(float outputX) {
+        if (cornerEditView == null) {
+            return;
+        }
 
+        PageCorners corners =
+                cornerEditView.getPageCorners();
+
+        List<BoundaryPair> boundaryPairs =
+                cornerEditView.getBoundaryPairs();
+
+        boundaryPairs.sort(
+                (a, b) -> Float.compare(
+                        a.outputX,
+                        b.outputX
+                )
+        );
+
+        BoundaryPair leftPair = null;
+        BoundaryPair rightPair = null;
+
+        for (BoundaryPair pair : boundaryPairs) {
+            if (pair.outputX < outputX) {
+                leftPair = pair;
+            } else {
+                rightPair = pair;
+                break;
+            }
+        }
+
+        float leftOutputX;
+        PointF leftTop;
+        PointF leftBottom;
+
+        if (leftPair != null) {
+            leftOutputX = leftPair.outputX;
+            leftTop = leftPair.inputTop;
+            leftBottom = leftPair.inputBottom;
+        } else {
+            leftOutputX = 0f;
+            leftTop = corners.topLeft;
+            leftBottom = corners.bottomLeft;
+        }
+
+        float rightOutputX;
+        PointF rightTop;
+        PointF rightBottom;
+
+        if (rightPair != null) {
+            rightOutputX = rightPair.outputX;
+            rightTop = rightPair.inputTop;
+            rightBottom = rightPair.inputBottom;
+        } else {
+            rightOutputX = 1f;
+            rightTop = corners.topRight;
+            rightBottom = corners.bottomRight;
+        }
+
+        float t =
+                (outputX - leftOutputX)
+                        / (rightOutputX - leftOutputX);
+
+        t = BandCorrectionMath.clamp(t, 0f, 1f);
+
+        BoundaryPair newPair = new BoundaryPair(
+                nextBoundaryId++,
+                outputX,
+                BandCorrectionMath.lerp(
+                        leftTop,
+                        rightTop,
+                        t
+                ),
+                BandCorrectionMath.lerp(
+                        leftBottom,
+                        rightBottom,
+                        t
+                )
+        );
+
+        boundaryPairs.add(newPair);
+
+        boundaryPairs.sort(
+                (a, b) -> Float.compare(
+                        a.outputX,
+                        b.outputX
+                )
+        );
+
+        cornerEditView.setBoundaryPairs(boundaryPairs);
+
+        widthDistributionBarView
+                .setMarkersFromBoundaryPairs(boundaryPairs);
+
+        if (showingResult) {
+            regenerateResultPreview();
+        }
+    }
 }

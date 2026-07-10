@@ -5,9 +5,15 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.GestureDetector;
+import android.view.HapticFeedbackConstants;
+import android.widget.PopupMenu;
 
+import com.example.bandsplitscanner.R;
 import com.example.bandsplitscanner.model.BoundaryPair;
 import com.example.bandsplitscanner.model.BoundaryMarker;
+
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,6 +29,10 @@ public class WidthDistributionBarView extends View {
         );
     }
 
+    public interface OnBoundaryAddRequestedListener {
+        void onBoundaryAddRequested(float outputX);
+    }
+
     private static final float HIT_RADIUS = 48f;
     private static final float MARKER_RADIUS = 16f;
     private static final float MIN_GAP = 0.03f;
@@ -35,7 +45,11 @@ public class WidthDistributionBarView extends View {
     private List<BoundaryMarker> markers = new ArrayList<>();
 
     private int activeMarkerIndex = -1;
+
+    private GestureDetector gestureDetector;
+
     private OnBoundaryOutputChangedListener listener;
+    private OnBoundaryAddRequestedListener addRequestedListener;
 
     public WidthDistributionBarView(Context context) {
         super(context);
@@ -65,6 +79,132 @@ public class WidthDistributionBarView extends View {
 
         endPointPaint.setColor(0xFF555555);
         endPointPaint.setStyle(Paint.Style.FILL);
+
+        gestureDetector = new GestureDetector(
+                getContext(),
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onDown(MotionEvent e) {
+                        return true;
+                    }
+
+                    @Override
+                    public void onLongPress(MotionEvent e) {
+                        if (activeMarkerIndex != -1) {
+                            return;
+                        }
+
+                        if (!isInsideBarHitArea(e.getX(), e.getY())) {
+                            return;
+                        }
+
+                        float outputX = viewXToOutputX(e.getX());
+
+                        if (!canAddMarkerAt(outputX)) {
+                            return;
+                        }
+
+                        performHapticFeedback(
+                                HapticFeedbackConstants.LONG_PRESS
+                        );
+
+                        showAddBoundaryMenu(
+                                outputX,
+                                e.getX(),
+                                e.getY()
+                        );
+                    }
+                }
+        );
+    }
+
+    private boolean isInsideBarHitArea(float viewX, float viewY) {
+        float centerY = getHeight() / 2f;
+
+        return viewX >= getBarStartX()
+                && viewX <= getBarEndX()
+                && Math.abs(viewY - centerY) <= HIT_RADIUS;
+    }
+
+    private boolean canAddMarkerAt(float outputX) {
+        if (outputX < MIN_GAP || outputX > 1f - MIN_GAP) {
+            return false;
+        }
+
+        for (BoundaryMarker marker : markers) {
+            if (Math.abs(marker.outputX - outputX) < MIN_GAP) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void showAddBoundaryMenu(
+            float outputX,
+            float touchX,
+            float touchY
+    ) {
+        View rootView = getRootView();
+
+        if (!(rootView instanceof ViewGroup)) {
+            return;
+        }
+
+        ViewGroup root = (ViewGroup) rootView;
+
+        int[] viewLocation = new int[2];
+        int[] rootLocation = new int[2];
+
+        getLocationOnScreen(viewLocation);
+        root.getLocationOnScreen(rootLocation);
+
+        int anchorX = Math.round(
+                viewLocation[0]
+                        - rootLocation[0]
+                        + touchX
+        );
+
+        int anchorY = Math.round(
+                viewLocation[1]
+                        - rootLocation[1]
+                        + touchY
+        );
+
+        View anchor = new View(getContext());
+
+        anchor.layout(
+                anchorX,
+                anchorY,
+                anchorX + 1,
+                anchorY + 1
+        );
+
+        root.getOverlay().add(anchor);
+
+        PopupMenu popupMenu = new PopupMenu(
+                getContext(),
+                anchor
+        );
+
+        popupMenu.getMenu().add(
+                R.string.add_boundary_here
+        );
+
+        popupMenu.setOnMenuItemClickListener(item -> {
+            if (addRequestedListener == null) {
+                return false;
+            }
+
+            addRequestedListener.onBoundaryAddRequested(outputX);
+            return true;
+        });
+
+        popupMenu.setOnDismissListener(menu -> {
+            root.getOverlay().remove(anchor);
+        });
+
+        popupMenu.show();
     }
 
     public void setMarkersFromBoundaryPairs(List<BoundaryPair> boundaryPairs) {
@@ -86,6 +226,9 @@ public class WidthDistributionBarView extends View {
 
     public void setOnBoundaryOutputChangedListener(OnBoundaryOutputChangedListener listener) {
         this.listener = listener;
+    }
+    public void setOnBoundaryAddRequestedListener(OnBoundaryAddRequestedListener listener) {
+        this.addRequestedListener = listener;
     }
 
     @Override
@@ -116,20 +259,24 @@ public class WidthDistributionBarView extends View {
             return false;
         }
 
+        gestureDetector.onTouchEvent(event);
+
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                activeMarkerIndex = findTouchedMarker(event.getX(), event.getY());
+                activeMarkerIndex =
+                        findTouchedMarker(event.getX(), event.getY());
+
                 invalidate();
-                return activeMarkerIndex != -1;
+                return true;
 
             case MotionEvent.ACTION_MOVE:
                 if (activeMarkerIndex != -1) {
                     moveActiveMarker(event.getX());
                     notifyChanged(false);
                     invalidate();
-                    return true;
                 }
-                return false;
+
+                return true;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
@@ -137,8 +284,10 @@ public class WidthDistributionBarView extends View {
                     moveActiveMarker(event.getX());
                     notifyChanged(true);
                 }
+
                 activeMarkerIndex = -1;
                 invalidate();
+
                 return true;
 
             default:
