@@ -27,25 +27,49 @@ public class BandCorrectionEngine {
             List<BoundaryPair> boundaryPairs,
             int outputWidth
     ) {
-        float aspectRatio = BandCorrectionMath.estimateAspectRatio(corners);
-        int outputHeight = Math.max(1, Math.round(outputWidth / aspectRatio));
+        float aspectRatio =
+                BandCorrectionMath.estimateAspectRatio(
+                        corners
+                );
 
-        OutputSettings settings = new OutputSettings(outputWidth, outputHeight);
-        List<BoundaryLine> boundaries = createBoundaryLines(corners, boundaryPairs);
+        int outputHeight = Math.max(
+                1,
+                Math.round(outputWidth / aspectRatio)
+        );
 
-        return renderer.render(source, boundaries, settings);
-    }
-
-    public Bitmap createFixedThreeBandResult(
-            Bitmap source,
-            PageCorners corners,
-            int outputWidth
-    ) {
         return createResult(
                 source,
                 corners,
-                createDefaultBoundaryPairs(corners),
-                outputWidth
+                boundaryPairs,
+                new OutputSettings(
+                        outputWidth,
+                        outputHeight
+                )
+        );
+    }
+
+    public Bitmap createResult(
+            Bitmap source,
+            PageCorners corners,
+            List<BoundaryPair> boundaryPairs,
+            OutputSettings settings
+    ) {
+        OutputSettings safeSettings =
+                new OutputSettings(
+                        Math.max(1, settings.outputWidth),
+                        Math.max(1, settings.outputHeight)
+                );
+
+        List<BoundaryLine> boundaries =
+                createBoundaryLines(
+                        corners,
+                        boundaryPairs
+                );
+
+        return renderer.render(
+                source,
+                boundaries,
+                safeSettings
         );
     }
 
@@ -96,27 +120,5 @@ public class BandCorrectionEngine {
         ));
 
         return lines;
-    }
-
-    public static List<BoundaryPair> createDefaultBoundaryPairs(PageCorners corners) {
-        List<BoundaryPair> pairs = new ArrayList<>();
-
-        float[] outputXs = new float[]{1f / 3f, 2f / 3f};
-
-        for (int i = 0; i < outputXs.length; i++) {
-            float t = outputXs[i];
-
-            PointF inputTop = BandCorrectionMath.lerp(corners.topLeft, corners.topRight, t);
-            PointF inputBottom = BandCorrectionMath.lerp(corners.bottomLeft, corners.bottomRight, t);
-
-            pairs.add(new BoundaryPair(
-                    i + 1,
-                    t,
-                    inputTop,
-                    inputBottom
-            ));
-        }
-
-        return pairs;
     }
 }

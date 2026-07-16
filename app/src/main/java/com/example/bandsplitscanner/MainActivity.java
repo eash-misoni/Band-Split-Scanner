@@ -21,6 +21,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.example.bandsplitscanner.correction.BandCorrectionEngine;
 import com.example.bandsplitscanner.correction.ScanlineBandRenderer;
 import com.example.bandsplitscanner.model.PageCorners;
+import com.example.bandsplitscanner.model.OutputSettings;
 import com.example.bandsplitscanner.view.CornerEditView;
 import com.example.bandsplitscanner.view.ResultPreviewView;
 import com.example.bandsplitscanner.view.WidthDistributionBarView;
@@ -48,6 +49,12 @@ public class MainActivity extends AppCompatActivity {
     private WidthDistributionBarView widthDistributionBarView;
     private ResultPreviewView resultPreviewView;
 
+    private static final int PREVIEW_OUTPUT_WIDTH =
+            1200;
+
+    private float outputAspectRatio =
+            Float.NaN;
+
     private boolean showingResult = false;
     private boolean showOutputBoundaryLines = true;
 
@@ -69,6 +76,7 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     nextBoundaryId = 1L;
+                    outputAspectRatio = Float.NaN;
                     cornerEditView = new CornerEditView(this, sourceBitmap);
                     showCornerEditView();
 
@@ -193,23 +201,55 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean generateCorrectedBitmap() {
-        if (sourceBitmap == null || cornerEditView == null) {
-            Toast.makeText(this, "先に画像を選択してください", Toast.LENGTH_SHORT).show();
+        if (sourceBitmap == null
+                || cornerEditView == null) {
+            Toast.makeText(
+                    this,
+                    "先に画像を選択してください",
+                    Toast.LENGTH_SHORT
+            ).show();
+
             return false;
         }
 
-        PageCorners corners = cornerEditView.getPageCorners();
-        List<BoundaryPair> boundaryPairs = cornerEditView.getBoundaryPairs();
+        PageCorners corners =
+                cornerEditView.getPageCorners();
 
-        BandCorrectionEngine engine = new BandCorrectionEngine(
-                new ScanlineBandRenderer()
+        List<BoundaryPair> boundaryPairs =
+                cornerEditView.getBoundaryPairs();
+
+        if (Float.isNaN(outputAspectRatio)) {
+            outputAspectRatio =
+                    BandCorrectionMath
+                            .estimateAspectRatio(
+                                    corners
+                            );
+        }
+
+        int outputHeight = Math.max(
+                1,
+                Math.round(
+                        PREVIEW_OUTPUT_WIDTH
+                                / outputAspectRatio
+                )
         );
+
+        OutputSettings settings =
+                new OutputSettings(
+                        PREVIEW_OUTPUT_WIDTH,
+                        outputHeight
+                );
+
+        BandCorrectionEngine engine =
+                new BandCorrectionEngine(
+                        new ScanlineBandRenderer()
+                );
 
         correctedBitmap = engine.createResult(
                 sourceBitmap,
                 corners,
                 boundaryPairs,
-                1200
+                settings
         );
 
         return true;
@@ -225,6 +265,18 @@ public class MainActivity extends AppCompatActivity {
 
         resultPreviewView =
                 new ResultPreviewView(this);
+
+        resultPreviewView
+                .setOnOutputAspectRatioChangedListener(
+                        (aspectRatio, isFinished) -> {
+                            outputAspectRatio =
+                                    aspectRatio;
+
+                            if (isFinished) {
+                                regenerateResultPreview();
+                            }
+                        }
+                );
 
         resultPreviewView.setBitmap(
                 correctedBitmap

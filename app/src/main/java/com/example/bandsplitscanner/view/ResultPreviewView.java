@@ -6,7 +6,9 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PointF;
+import android.graphics.RectF;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.View;
 
 import com.example.bandsplitscanner.model.BoundaryMarker;
@@ -16,6 +18,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ResultPreviewView extends View {
+    public interface OnOutputAspectRatioChangedListener {
+        void onOutputAspectRatioChanged(
+                float aspectRatio,
+                boolean isFinished
+        );
+    }
 
     private Bitmap bitmap;
 
@@ -23,8 +31,19 @@ public class ResultPreviewView extends View {
 
     private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint boundaryLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint outputFramePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private List<BoundaryPair> boundaryPairs = new ArrayList<>();
+
+    private static final float MIN_OUTPUT_ASPECT_RATIO = 0.4f;
+    private static final float MAX_OUTPUT_ASPECT_RATIO = 3.0f;
+    private static final float RIGHT_EDGE_HIT_RADIUS = 36f;
+
+    private final RectF draggingOutputFrameRect = new RectF();
+    private boolean draggingOutputFrameRightEdge = false;
+    private float rightEdgeTouchOffset = 0f;
+    private float dragStartAspectRatio = 1f;
+    private OnOutputAspectRatioChangedListener outputAspectRatioChangedListener;
     private boolean showOutputBoundaryLines = true;
 
     public ResultPreviewView(Context context) {
@@ -48,6 +67,10 @@ public class ResultPreviewView extends View {
         boundaryLinePaint.setColor(0xFFFF4444);
         boundaryLinePaint.setStyle(Paint.Style.STROKE);
         boundaryLinePaint.setStrokeWidth(5f);
+
+        outputFramePaint.setColor(0xFF00BCD4);
+        outputFramePaint.setStyle(Paint.Style.STROKE);
+        outputFramePaint.setStrokeWidth(6f);
     }
 
     public void setBitmap(Bitmap bitmap) {
@@ -65,6 +88,13 @@ public class ResultPreviewView extends View {
         }
 
         invalidate();
+    }
+
+    public void setOnOutputAspectRatioChangedListener(
+            OnOutputAspectRatioChangedListener listener
+    ) {
+        this.outputAspectRatioChangedListener =
+                listener;
     }
 
     public void applyOutputXFromWidthBar(BoundaryMarker marker) {
@@ -103,11 +133,61 @@ public class ResultPreviewView extends View {
 
         updateBitmapMatrix();
 
-        canvas.drawBitmap(bitmap, bitmapToViewMatrix, imagePaint);
+        canvas.drawBitmap(
+                bitmap,
+                bitmapToViewMatrix,
+                imagePaint
+        );
 
         if (showOutputBoundaryLines) {
             drawOutputBoundaryLines(canvas);
         }
+
+        drawOutputFrame(canvas);
+    }
+
+    private void drawOutputFrame(Canvas canvas) {
+        RectF frameRect = getCurrentOutputFrameRect();
+
+        float halfStroke = outputFramePaint.getStrokeWidth() / 2f;
+
+        RectF drawableRect = new RectF(frameRect);
+
+        drawableRect.inset(
+                halfStroke,
+                halfStroke
+        );
+
+        canvas.drawRect(
+                drawableRect,
+                outputFramePaint
+        );
+    }
+
+    private RectF getCurrentOutputFrameRect() {
+        if (draggingOutputFrameRightEdge) {
+            return new RectF(
+                    draggingOutputFrameRect
+            );
+        }
+
+        return getDisplayedBitmapRect();
+    }
+    private RectF getDisplayedBitmapRect() {
+        if (bitmap == null) {
+            return new RectF();
+        }
+
+        RectF rect = new RectF(
+                0f,
+                0f,
+                bitmap.getWidth(),
+                bitmap.getHeight()
+        );
+
+        bitmapToViewMatrix.mapRect(rect);
+
+        return rect;
     }
 
     private void updateBitmapMatrix() {
@@ -150,6 +230,218 @@ public class ResultPreviewView extends View {
                     boundaryLinePaint
             );
         }
+    }
+
+    private boolean isNearOutputFrameRightEdge(
+            float viewX,
+            float viewY
+    ) {
+        RectF frameRect =
+                getDisplayedBitmapRect();
+
+        boolean nearRight =
+                Math.abs(
+                        viewX - frameRect.right
+                ) <= RIGHT_EDGE_HIT_RADIUS;
+
+        boolean insideVerticalRange =
+                viewY >= frameRect.top
+                        - RIGHT_EDGE_HIT_RADIUS
+                        && viewY <= frameRect.bottom
+                        + RIGHT_EDGE_HIT_RADIUS;
+
+        return nearRight
+                && insideVerticalRange;
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (bitmap == null) {
+            return false;
+        }
+
+        updateBitmapMatrix();
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (!isNearOutputFrameRightEdge(
+                        event.getX(),
+                        event.getY()
+                )) {
+                    return false;
+                }
+
+                startRightEdgeDrag(
+                        event.getX()
+                );
+
+                getParent()
+                        .requestDisallowInterceptTouchEvent(
+                                true
+                        );
+
+                invalidate();
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                if (!draggingOutputFrameRightEdge) {
+                    return false;
+                }
+
+                updateRightEdgeDrag(
+                        event.getX(),
+                        false
+                );
+
+                return true;
+
+            case MotionEvent.ACTION_UP:
+                if (!draggingOutputFrameRightEdge) {
+                    return false;
+                }
+
+                updateRightEdgeDrag(
+                        event.getX(),
+                        true
+                );
+
+                finishRightEdgeDrag();
+
+                performClick();
+                return true;
+
+            case MotionEvent.ACTION_CANCEL:
+                if (!draggingOutputFrameRightEdge) {
+                    return false;
+                }
+
+                cancelRightEdgeDrag();
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private void startRightEdgeDrag(
+            float touchX
+    ) {
+        RectF frameRect =
+                getDisplayedBitmapRect();
+
+        draggingOutputFrameRect.set(
+                frameRect
+        );
+
+        draggingOutputFrameRightEdge = true;
+
+        rightEdgeTouchOffset =
+                frameRect.right - touchX;
+
+        dragStartAspectRatio =
+                frameRect.width()
+                        / frameRect.height();
+    }
+
+    private void updateRightEdgeDrag(
+            float touchX,
+            boolean isFinished
+    ) {
+        if (!draggingOutputFrameRightEdge) {
+            return;
+        }
+
+        float frameHeight =
+                draggingOutputFrameRect.height();
+
+        if (frameHeight <= 0f) {
+            return;
+        }
+
+        float minRight =
+                draggingOutputFrameRect.left
+                        + frameHeight
+                        * MIN_OUTPUT_ASPECT_RATIO;
+
+        float maxRightByAspectRatio =
+                draggingOutputFrameRect.left
+                        + frameHeight
+                        * MAX_OUTPUT_ASPECT_RATIO;
+
+        float maxRightByView =
+                getWidth()
+                        - outputFramePaint
+                        .getStrokeWidth()
+                        / 2f;
+
+        float maxRight = Math.min(
+                maxRightByAspectRatio,
+                maxRightByView
+        );
+
+        if (maxRight < minRight) {
+            minRight = maxRight;
+        }
+
+        float requestedRight =
+                touchX + rightEdgeTouchOffset;
+
+        draggingOutputFrameRect.right =
+                clamp(
+                        requestedRight,
+                        minRight,
+                        maxRight
+                );
+
+        float aspectRatio =
+                draggingOutputFrameRect.width()
+                        / frameHeight;
+
+        if (outputAspectRatioChangedListener != null) {
+            outputAspectRatioChangedListener
+                    .onOutputAspectRatioChanged(
+                            aspectRatio,
+                            isFinished
+                    );
+        }
+
+        invalidate();
+    }
+
+    private void finishRightEdgeDrag() {
+        draggingOutputFrameRightEdge = false;
+
+        getParent()
+                .requestDisallowInterceptTouchEvent(
+                        false
+                );
+
+        invalidate();
+    }
+
+    private void cancelRightEdgeDrag() {
+        draggingOutputFrameRightEdge = false;
+
+        if (outputAspectRatioChangedListener != null) {
+            outputAspectRatioChangedListener
+                    .onOutputAspectRatioChanged(
+                            dragStartAspectRatio,
+                            false
+                    );
+        }
+
+        getParent()
+                .requestDisallowInterceptTouchEvent(
+                        false
+                );
+
+        invalidate();
+    }
+
+    @Override
+    public boolean performClick() {
+        super.performClick();
+        return true;
     }
 
     private PointF mapBitmapPointToView(float x, float y) {
