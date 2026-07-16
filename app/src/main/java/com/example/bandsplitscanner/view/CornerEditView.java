@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PointF;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import com.example.bandsplitscanner.model.BoundaryMarker;
@@ -30,6 +31,10 @@ public class CornerEditView extends View {
     private static final int DRAG_SPLIT_LINE = 4;
     private static final int DRAG_LEFT_BOUNDARY = 5;
     private static final int DRAG_RIGHT_BOUNDARY = 6;
+    private static final int DRAG_PAN = 7;
+
+    private static final float MIN_ZOOM = 1f;
+    private static final float MAX_ZOOM = 5f;
 
     private final Bitmap bitmap;
 
@@ -49,7 +54,18 @@ public class CornerEditView extends View {
 
     private int dragMode = DRAG_NONE;
     private int activeBoundaryIndex = -1;
+
     private PointF lastImageTouchPoint = null;
+
+    private final ScaleGestureDetector scaleGestureDetector;
+
+    private float zoomScale = 1f;
+    private float panX = 0f;
+    private float panY = 0f;
+
+    private boolean isScaling = false;
+
+    private PointF lastViewTouchPoint = null;
 
     public CornerEditView(Context context, Bitmap bitmap) {
         super(context);
@@ -74,6 +90,95 @@ public class CornerEditView extends View {
         activeSplitLinePaint.setColor(0xFFFF4444);
         activeSplitLinePaint.setStyle(Paint.Style.STROKE);
         activeSplitLinePaint.setStrokeWidth(6f);
+
+        scaleGestureDetector = new ScaleGestureDetector(
+                context,
+                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override
+                    public boolean onScaleBegin(
+                            ScaleGestureDetector detector
+                    ) {
+                        isScaling = true;
+
+                        // 1本指でラインを動かしている途中に
+                        // 2本目の指が置かれた場合、編集操作を中断する。
+                        clearDragState();
+
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onScale(
+                            ScaleGestureDetector detector
+                    ) {
+                        updateImageMatrix();
+
+                        float focusX = detector.getFocusX();
+                        float focusY = detector.getFocusY();
+
+                        /*
+                         * 拡大前に、ピンチ中心が画像上のどの点を
+                         * 指しているか取得する。
+                         */
+                        PointF focusInImage =
+                                mapViewPointToImage(
+                                        focusX,
+                                        focusY
+                                );
+
+                        float newZoomScale = clamp(
+                                zoomScale
+                                        * detector.getScaleFactor(),
+                                MIN_ZOOM,
+                                MAX_ZOOM
+                        );
+
+                        if (newZoomScale == zoomScale) {
+                            return true;
+                        }
+
+                        zoomScale = newZoomScale;
+
+                        /*
+                         * いったん新しい倍率で行列を作る。
+                         */
+                        updateImageMatrix();
+
+                        /*
+                         * 拡大前に指していた画像上の点が、
+                         * 拡大後に画面上のどこへ移動したか調べる。
+                         */
+                        PointF focusAfterScale =
+                                mapImagePointToView(
+                                        focusInImage
+                                );
+
+                        /*
+                         * その点がピンチ中心に残るように
+                         * パン量を補正する。
+                         */
+                        panX += focusX - focusAfterScale.x;
+                        panY += focusY - focusAfterScale.y;
+
+                        constrainPan();
+                        updateImageMatrix();
+                        invalidate();
+
+                        return true;
+                    }
+
+                    @Override
+                    public void onScaleEnd(
+                            ScaleGestureDetector detector
+                    ) {
+                        isScaling = false;
+
+                        constrainPan();
+                        updateImageMatrix();
+                        invalidate();
+                    }
+                }
+        );
 
         initDefaultCorners();
     }
@@ -118,7 +223,9 @@ public class CornerEditView extends View {
     }
 
     private void updateImageMatrix() {
-        if (bitmap == null || getWidth() == 0 || getHeight() == 0) {
+        if (bitmap == null
+                || getWidth() == 0
+                || getHeight() == 0) {
             return;
         }
 
@@ -128,19 +235,97 @@ public class CornerEditView extends View {
         float bitmapWidth = bitmap.getWidth();
         float bitmapHeight = bitmap.getHeight();
 
-        float scale = Math.min(viewWidth / bitmapWidth, viewHeight / bitmapHeight);
+        /*
+         * 画像全体がView内に収まる基準倍率。
+         */
+        float baseScale = Math.min(
+                viewWidth / bitmapWidth,
+                viewHeight / bitmapHeight
+        );
 
-        float displayedWidth = bitmapWidth * scale;
-        float displayedHeight = bitmapHeight * scale;
+        float totalScale =
+                baseScale * zoomScale;
 
-        float dx = (viewWidth - displayedWidth) / 2f;
-        float dy = (viewHeight - displayedHeight) / 2f;
+        float displayedWidth =
+                bitmapWidth * totalScale;
+
+        float displayedHeight =
+                bitmapHeight * totalScale;
+
+        /*
+         * fit-center位置にパン量を追加する。
+         */
+        float dx =
+                (viewWidth - displayedWidth) / 2f
+                        + panX;
+
+        float dy =
+                (viewHeight - displayedHeight) / 2f
+                        + panY;
 
         imageToViewMatrix.reset();
-        imageToViewMatrix.postScale(scale, scale);
-        imageToViewMatrix.postTranslate(dx, dy);
+        imageToViewMatrix.postScale(
+                totalScale,
+                totalScale
+        );
+        imageToViewMatrix.postTranslate(
+                dx,
+                dy
+        );
 
-        imageToViewMatrix.invert(viewToImageMatrix);
+        imageToViewMatrix.invert(
+                viewToImageMatrix
+        );
+    }
+
+    private void constrainPan() {
+        if (bitmap == null
+                || getWidth() == 0
+                || getHeight() == 0) {
+            return;
+        }
+
+        float viewWidth = getWidth();
+        float viewHeight = getHeight();
+
+        float bitmapWidth = bitmap.getWidth();
+        float bitmapHeight = bitmap.getHeight();
+
+        float baseScale = Math.min(
+                viewWidth / bitmapWidth,
+                viewHeight / bitmapHeight
+        );
+
+        float totalScale =
+                baseScale * zoomScale;
+
+        float displayedWidth =
+                bitmapWidth * totalScale;
+
+        float displayedHeight =
+                bitmapHeight * totalScale;
+
+        float maxPanX = Math.max(
+                0f,
+                (displayedWidth - viewWidth) / 2f
+        );
+
+        float maxPanY = Math.max(
+                0f,
+                (displayedHeight - viewHeight) / 2f
+        );
+
+        panX = clamp(
+                panX,
+                -maxPanX,
+                maxPanX
+        );
+
+        panY = clamp(
+                panY,
+                -maxPanY,
+                maxPanY
+        );
     }
 
     private float[] getCornerPointsInView() {
@@ -233,20 +418,50 @@ public class CornerEditView extends View {
     public boolean onTouchEvent(MotionEvent event) {
         updateImageMatrix();
 
+        scaleGestureDetector.onTouchEvent(event);
+
+        /*
+         * 2本目の指が置かれた時点で、
+         * 進行中の1本指操作を解除する。
+         */
+        if (event.getActionMasked()
+                == MotionEvent.ACTION_POINTER_DOWN) {
+            clearDragState();
+        }
+
+        /*
+         * 2本指操作中はズームだけを処理する。
+         */
+        if (scaleGestureDetector.isInProgress()
+                || isScaling
+                || event.getPointerCount() > 1) {
+            invalidate();
+            return true;
+        }
+
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                handleActionDown(event.getX(), event.getY());
+                handleActionDown(
+                        event.getX(),
+                        event.getY()
+                );
+
                 invalidate();
                 return true;
 
             case MotionEvent.ACTION_MOVE:
-                handleActionMove(event.getX(), event.getY());
+                handleActionMove(
+                        event.getX(),
+                        event.getY()
+                );
+
                 invalidate();
                 return true;
 
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 clearDragState();
+
                 invalidate();
                 return true;
 
@@ -275,11 +490,27 @@ public class CornerEditView extends View {
 
         if (findTouchedSplitLine(viewX, viewY)) {
             lastImageTouchPoint = mapViewPointToImage(viewX, viewY);
+            return;
         }
+
+        /*
+         * 操作点・左右境界・分割ラインの
+         * いずれにも当たらなかった場合はパン。
+         */
+        dragMode = DRAG_PAN;
+
+        lastViewTouchPoint = new PointF(
+                viewX,
+                viewY
+        );
     }
 
-    private void handleActionMove(float viewX, float viewY) {
-        if (dragMode == DRAG_CORNER && activeCornerIndex != -1) {
+    private void handleActionMove(
+            float viewX,
+            float viewY
+    ) {
+        if (dragMode == DRAG_CORNER
+                && activeCornerIndex != -1) {
             moveActiveCorner(viewX, viewY);
             return;
         }
@@ -290,8 +521,14 @@ public class CornerEditView extends View {
             return;
         }
 
+        if (dragMode == DRAG_PAN) {
+            moveViewport(viewX, viewY);
+            return;
+        }
+
         if (activeBoundaryIndex < 0
-                || activeBoundaryIndex >= boundaryPairs.size()) {
+                || activeBoundaryIndex
+                >= boundaryPairs.size()) {
             return;
         }
 
@@ -317,7 +554,9 @@ public class CornerEditView extends View {
         dragMode = DRAG_NONE;
         activeCornerIndex = -1;
         activeBoundaryIndex = -1;
+
         lastImageTouchPoint = null;
+        lastViewTouchPoint = null;
     }
 
     private boolean findTouchedSplitEndpoint(float viewX, float viewY) {
@@ -542,6 +781,33 @@ public class CornerEditView extends View {
         movePointPair(top, bottom, dx, dy);
 
         lastImageTouchPoint = currentImagePoint;
+    }
+
+    private void moveViewport(
+            float viewX,
+            float viewY
+    ) {
+        if (lastViewTouchPoint == null) {
+            lastViewTouchPoint =
+                    new PointF(viewX, viewY);
+
+            return;
+        }
+
+        float dx =
+                viewX - lastViewTouchPoint.x;
+
+        float dy =
+                viewY - lastViewTouchPoint.y;
+
+        panX += dx;
+        panY += dy;
+
+        constrainPan();
+        updateImageMatrix();
+
+        lastViewTouchPoint.x = viewX;
+        lastViewTouchPoint.y = viewY;
     }
 
     private PointF getCornerByIndex(int index) {
