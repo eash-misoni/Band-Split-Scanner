@@ -2,4 +2,5 @@
     <string name="app_name">BandSplitScanner</string>
     <string name="add_boundary_here">ここに境界を追加</string>
     <string name="delete_boundary">削除</string>
+    <string name="show_output_boundary_lines">出力境界線を表示</string>
 </resources>

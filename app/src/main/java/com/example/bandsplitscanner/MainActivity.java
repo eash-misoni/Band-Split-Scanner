@@ -13,6 +13,7 @@ import androidx.activity.EdgeToEdge;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -38,6 +39,7 @@ public class MainActivity extends AppCompatActivity {
     private Button selectButton;
     private Button correctButton;
     private Button backButton;
+    private SwitchCompat outputBoundarySwitch;
 
     private Bitmap sourceBitmap;
     private Bitmap correctedBitmap;
@@ -47,6 +49,7 @@ public class MainActivity extends AppCompatActivity {
     private ResultPreviewView resultPreviewView;
 
     private boolean showingResult = false;
+    private boolean showOutputBoundaryLines = true;
 
     private long nextBoundaryId = 1L;
 
@@ -88,6 +91,7 @@ public class MainActivity extends AppCompatActivity {
         selectButton = findViewById(R.id.selectButton);
         correctButton = findViewById(R.id.correctButton);
         backButton = findViewById(R.id.backButton);
+        outputBoundarySwitch = findViewById(R.id.outputBoundarySwitch);
 
         correctButton.setEnabled(false);
         backButton.setEnabled(false);
@@ -105,6 +109,23 @@ public class MainActivity extends AppCompatActivity {
                 showCornerEditView();
             }
         });
+
+        outputBoundarySwitch.setChecked(
+                showOutputBoundaryLines
+        );
+
+        outputBoundarySwitch.setOnCheckedChangeListener(
+                (buttonView, isChecked) -> {
+                    showOutputBoundaryLines = isChecked;
+
+                    if (resultPreviewView != null) {
+                        resultPreviewView
+                                .setShowOutputBoundaryLines(
+                                        isChecked
+                                );
+                    }
+                }
+        );
 
         widthDistributionBarView = findViewById(R.id.widthDistributionBarView);
         widthDistributionBarView.setOnBoundaryOutputChangedListener(
@@ -131,26 +152,37 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showCornerEditView() {
-            imageContainer.removeAllViews();
+        imageContainer.removeAllViews();
 
-            imageContainer.addView(
-                    cornerEditView,
-                    new FrameLayout.LayoutParams(
-                            FrameLayout.LayoutParams.MATCH_PARENT,
-                            FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-            );
+        imageContainer.addView(
+                cornerEditView,
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                )
+        );
 
-            resultPreviewView = null;
-            showingResult = false;
+        resultPreviewView = null;
+        showingResult = false;
 
-            widthDistributionBarView.setVisibility(View.VISIBLE);
-            widthDistributionBarView.setEnabled(true);
-            widthDistributionBarView.setMarkersFromBoundaryPairs(cornerEditView.getBoundaryPairs());
+        widthDistributionBarView.setVisibility(
+                View.VISIBLE
+        );
 
-            correctButton.setEnabled(true);
-            backButton.setEnabled(false);
-        }
+        widthDistributionBarView.setEnabled(true);
+
+        widthDistributionBarView
+                .setMarkersFromBoundaryPairs(
+                        cornerEditView.getBoundaryPairs()
+                );
+
+        outputBoundarySwitch.setVisibility(
+                View.GONE
+        );
+
+        correctButton.setEnabled(true);
+        backButton.setEnabled(false);
+    }
 
     private void createCorrectionResult() {
         if (!generateCorrectedBitmap()) {
@@ -184,16 +216,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showResultView() {
-        if (correctedBitmap == null || cornerEditView == null) {
+        if (correctedBitmap == null
+                || cornerEditView == null) {
             return;
         }
 
         imageContainer.removeAllViews();
 
-        resultPreviewView = new ResultPreviewView(this);
-        resultPreviewView.setBitmap(correctedBitmap);
-        resultPreviewView.setBoundaryPairs(cornerEditView.getBoundaryPairs());
-        resultPreviewView.setShowOutputBoundaryLines(true);
+        resultPreviewView =
+                new ResultPreviewView(this);
+
+        resultPreviewView.setBitmap(
+                correctedBitmap
+        );
+
+        resultPreviewView.setBoundaryPairs(
+                cornerEditView.getBoundaryPairs()
+        );
+
+        resultPreviewView.setShowOutputBoundaryLines(
+                showOutputBoundaryLines
+        );
 
         imageContainer.addView(
                 resultPreviewView,
@@ -205,9 +248,24 @@ public class MainActivity extends AppCompatActivity {
 
         showingResult = true;
 
-        widthDistributionBarView.setVisibility(View.VISIBLE);
+        widthDistributionBarView.setVisibility(
+                View.VISIBLE
+        );
+
         widthDistributionBarView.setEnabled(true);
-        widthDistributionBarView.setMarkersFromBoundaryPairs(cornerEditView.getBoundaryPairs());
+
+        widthDistributionBarView
+                .setMarkersFromBoundaryPairs(
+                        cornerEditView.getBoundaryPairs()
+                );
+
+        outputBoundarySwitch.setChecked(
+                showOutputBoundaryLines
+        );
+
+        outputBoundarySwitch.setVisibility(
+                View.VISIBLE
+        );
 
         correctButton.setEnabled(false);
         backButton.setEnabled(true);

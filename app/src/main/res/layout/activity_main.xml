@@ -19,6 +19,17 @@
         android:paddingEnd="12dp"
         android:visibility="gone" />
 
+    <androidx.appcompat.widget.SwitchCompat
+        android:id="@+id/outputBoundarySwitch"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:text="@string/show_output_boundary_lines"
+        android:checked="true"
+        android:visibility="gone" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
