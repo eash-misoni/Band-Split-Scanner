@@ -9,6 +9,7 @@ import android.graphics.PointF;
 import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import com.example.bandsplitscanner.model.BoundaryMarker;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ResultPreviewView extends View {
+
     public interface OnOutputAspectRatioChangedListener {
         void onOutputAspectRatioChanged(
                 float aspectRatio,
@@ -25,48 +27,74 @@ public class ResultPreviewView extends View {
         );
     }
 
-    private Bitmap bitmap;
-
-    private final Matrix bitmapToViewMatrix = new Matrix();
-
-    private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint boundaryLinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint outputFramePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-    private List<BoundaryPair> boundaryPairs = new ArrayList<>();
+    private static final float MIN_PREVIEW_ZOOM = 0.25f;
+    private static final float MAX_PREVIEW_ZOOM = 5f;
+    private static final float MIN_VISIBLE_IMAGE_DP = 48f;
 
     private static final float MIN_OUTPUT_ASPECT_RATIO = 0.4f;
     private static final float MAX_OUTPUT_ASPECT_RATIO = 3.0f;
+
     private static final int OUTPUT_FRAME_EDGE_NONE = 0;
     private static final int OUTPUT_FRAME_EDGE_LEFT = 1;
     private static final int OUTPUT_FRAME_EDGE_RIGHT = 2;
+    private static final float OUTPUT_FRAME_EDGE_HIT_RADIUS = 36f;
 
-    private static final float OUTPUT_FRAME_EDGE_HIT_RADIUS =
-            36f;
+    private Bitmap bitmap;
+
+    private final Matrix bitmapToViewMatrix = new Matrix();
+    private final Matrix viewToBitmapMatrix = new Matrix();
+
+    private final Paint imagePaint =
+            new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint boundaryLinePaint =
+            new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint outputFramePaint =
+            new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private List<BoundaryPair> boundaryPairs =
+            new ArrayList<>();
 
     private final RectF draggingOutputFrameRect =
             new RectF();
 
     private int draggingOutputFrameEdge =
             OUTPUT_FRAME_EDGE_NONE;
-
     private float edgeTouchOffset = 0f;
-
     private float dragStartAspectRatio = 1f;
-    private OnOutputAspectRatioChangedListener outputAspectRatioChangedListener;
+
+    private OnOutputAspectRatioChangedListener
+            outputAspectRatioChangedListener;
+
     private boolean showOutputBoundaryLines = true;
+
+    private ScaleGestureDetector scaleGestureDetector;
+    private float minVisibleImagePx;
+
+    private float previewZoomScale = 1f;
+    private float previewPanX = 0f;
+    private float previewPanY = 0f;
+
+    private boolean isScaling = false;
+    private PointF lastPanTouchPoint = null;
 
     public ResultPreviewView(Context context) {
         super(context);
         init();
     }
 
-    public ResultPreviewView(Context context, AttributeSet attrs) {
+    public ResultPreviewView(
+            Context context,
+            AttributeSet attrs
+    ) {
         super(context, attrs);
         init();
     }
 
-    public ResultPreviewView(Context context, AttributeSet attrs, int defStyleAttr) {
+    public ResultPreviewView(
+            Context context,
+            AttributeSet attrs,
+            int defStyleAttr
+    ) {
         super(context, attrs, defStyleAttr);
         init();
     }
@@ -81,14 +109,114 @@ public class ResultPreviewView extends View {
         outputFramePaint.setColor(0xFF00BCD4);
         outputFramePaint.setStyle(Paint.Style.STROKE);
         outputFramePaint.setStrokeWidth(6f);
+
+        minVisibleImagePx =
+                MIN_VISIBLE_IMAGE_DP
+                        * getResources()
+                        .getDisplayMetrics()
+                        .density;
+
+        scaleGestureDetector =
+                new ScaleGestureDetector(
+                        getContext(),
+                        new ScaleGestureDetector
+                                .SimpleOnScaleGestureListener() {
+
+                            @Override
+                            public boolean onScaleBegin(
+                                    ScaleGestureDetector detector
+                            ) {
+                                isScaling = true;
+                                cancelSingleFingerOperationForScale();
+                                return true;
+                            }
+
+                            @Override
+                            public boolean onScale(
+                                    ScaleGestureDetector detector
+                            ) {
+                                updateBitmapMatrix();
+
+                                float focusX =
+                                        detector.getFocusX();
+                                float focusY =
+                                        detector.getFocusY();
+
+                                PointF focusInBitmap =
+                                        mapViewPointToBitmap(
+                                                focusX,
+                                                focusY
+                                        );
+
+                                float newZoomScale =
+                                        clamp(
+                                                previewZoomScale
+                                                        * detector
+                                                        .getScaleFactor(),
+                                                MIN_PREVIEW_ZOOM,
+                                                MAX_PREVIEW_ZOOM
+                                        );
+
+                                if (newZoomScale
+                                        == previewZoomScale) {
+                                    return true;
+                                }
+
+                                previewZoomScale =
+                                        newZoomScale;
+
+                                updateBitmapMatrix();
+
+                                PointF focusAfterScale =
+                                        mapBitmapPointToView(
+                                                focusInBitmap.x,
+                                                focusInBitmap.y
+                                        );
+
+                                previewPanX +=
+                                        focusX
+                                                - focusAfterScale.x;
+                                previewPanY +=
+                                        focusY
+                                                - focusAfterScale.y;
+
+                                constrainPan();
+                                updateBitmapMatrix();
+                                invalidate();
+                                return true;
+                            }
+
+                            @Override
+                            public void onScaleEnd(
+                                    ScaleGestureDetector detector
+                            ) {
+                                isScaling = false;
+                                constrainPan();
+                                updateBitmapMatrix();
+                                invalidate();
+                            }
+                        }
+                );
     }
 
     public void setBitmap(Bitmap bitmap) {
         this.bitmap = bitmap;
+
+        if (bitmap == null) {
+            previewZoomScale = 1f;
+            previewPanX = 0f;
+            previewPanY = 0f;
+        } else {
+            constrainPan();
+            updateBitmapMatrix();
+        }
+
         invalidate();
     }
 
-    public void setBoundaryPairs(List<BoundaryPair> boundaryPairs) {
+    public void setBoundaryPairs(
+            List<BoundaryPair> boundaryPairs
+    ) {
         this.boundaryPairs = new ArrayList<>();
 
         if (boundaryPairs != null) {
@@ -103,14 +231,17 @@ public class ResultPreviewView extends View {
     public void setOnOutputAspectRatioChangedListener(
             OnOutputAspectRatioChangedListener listener
     ) {
-        this.outputAspectRatioChangedListener =
-                listener;
+        this.outputAspectRatioChangedListener = listener;
     }
 
-    public void applyOutputXFromWidthBar(BoundaryMarker marker) {
+    public void applyOutputXFromWidthBar(
+            BoundaryMarker marker
+    ) {
         long boundaryId = marker.boundaryId;
         float outputX = marker.outputX;
-        BoundaryPair pair = getBoundaryPairById(boundaryId);
+
+        BoundaryPair pair =
+                getBoundaryPairById(boundaryId);
 
         if (pair != null) {
             pair.outputX = outputX;
@@ -118,19 +249,42 @@ public class ResultPreviewView extends View {
         }
     }
 
-    private BoundaryPair getBoundaryPairById(long boundaryId) {
+    private BoundaryPair getBoundaryPairById(
+            long boundaryId
+    ) {
         for (BoundaryPair pair : boundaryPairs) {
             if (pair.id == boundaryId) {
                 return pair;
             }
         }
+
         return null;
     }
 
-
-    public void setShowOutputBoundaryLines(boolean showOutputBoundaryLines) {
-        this.showOutputBoundaryLines = showOutputBoundaryLines;
+    public void setShowOutputBoundaryLines(
+            boolean showOutputBoundaryLines
+    ) {
+        this.showOutputBoundaryLines =
+                showOutputBoundaryLines;
         invalidate();
+    }
+
+    @Override
+    protected void onSizeChanged(
+            int width,
+            int height,
+            int oldWidth,
+            int oldHeight
+    ) {
+        super.onSizeChanged(
+                width,
+                height,
+                oldWidth,
+                oldHeight
+        );
+
+        constrainPan();
+        updateBitmapMatrix();
     }
 
     @Override
@@ -157,11 +311,15 @@ public class ResultPreviewView extends View {
     }
 
     private void drawOutputFrame(Canvas canvas) {
-        RectF frameRect = getCurrentOutputFrameRect();
+        RectF frameRect =
+                getCurrentOutputFrameRect();
 
-        float halfStroke = outputFramePaint.getStrokeWidth() / 2f;
+        float halfStroke =
+                outputFramePaint.getStrokeWidth()
+                        / 2f;
 
-        RectF drawableRect = new RectF(frameRect);
+        RectF drawableRect =
+                new RectF(frameRect);
 
         drawableRect.inset(
                 halfStroke,
@@ -184,25 +342,28 @@ public class ResultPreviewView extends View {
 
         return getDisplayedBitmapRect();
     }
+
     private RectF getDisplayedBitmapRect() {
         if (bitmap == null) {
             return new RectF();
         }
 
-        RectF rect = new RectF(
-                0f,
-                0f,
-                bitmap.getWidth(),
-                bitmap.getHeight()
-        );
+        RectF rect =
+                new RectF(
+                        0f,
+                        0f,
+                        bitmap.getWidth(),
+                        bitmap.getHeight()
+                );
 
         bitmapToViewMatrix.mapRect(rect);
-
         return rect;
     }
 
     private void updateBitmapMatrix() {
-        if (bitmap == null || getWidth() == 0 || getHeight() == 0) {
+        if (bitmap == null
+                || getWidth() == 0
+                || getHeight() == 0) {
             return;
         }
 
@@ -212,26 +373,138 @@ public class ResultPreviewView extends View {
         float bitmapWidth = bitmap.getWidth();
         float bitmapHeight = bitmap.getHeight();
 
-        float scale = Math.min(viewWidth / bitmapWidth, viewHeight / bitmapHeight);
+        float baseScale =
+                Math.min(
+                        viewWidth / bitmapWidth,
+                        viewHeight / bitmapHeight
+                );
 
-        float displayedWidth = bitmapWidth * scale;
-        float displayedHeight = bitmapHeight * scale;
+        float totalScale =
+                baseScale * previewZoomScale;
 
-        float dx = (viewWidth - displayedWidth) / 2f;
-        float dy = (viewHeight - displayedHeight) / 2f;
+        float displayedWidth =
+                bitmapWidth * totalScale;
+        float displayedHeight =
+                bitmapHeight * totalScale;
+
+        float dx =
+                (viewWidth - displayedWidth) / 2f
+                        + previewPanX;
+        float dy =
+                (viewHeight - displayedHeight) / 2f
+                        + previewPanY;
 
         bitmapToViewMatrix.reset();
-        bitmapToViewMatrix.postScale(scale, scale);
+        bitmapToViewMatrix.postScale(
+                totalScale,
+                totalScale
+        );
         bitmapToViewMatrix.postTranslate(dx, dy);
+
+        bitmapToViewMatrix.invert(
+                viewToBitmapMatrix
+        );
     }
 
-    private void drawOutputBoundaryLines(Canvas canvas) {
-        for (BoundaryPair pair : boundaryPairs) {
-            float outputX = clamp(pair.outputX, 0f, 1f);
-            float x = outputX * bitmap.getWidth();
+    private void constrainPan() {
+        if (bitmap == null
+                || getWidth() == 0
+                || getHeight() == 0) {
+            return;
+        }
 
-            PointF top = mapBitmapPointToView(x, 0f);
-            PointF bottom = mapBitmapPointToView(x, bitmap.getHeight());
+        float viewWidth = getWidth();
+        float viewHeight = getHeight();
+
+        float bitmapWidth = bitmap.getWidth();
+        float bitmapHeight = bitmap.getHeight();
+
+        float baseScale =
+                Math.min(
+                        viewWidth / bitmapWidth,
+                        viewHeight / bitmapHeight
+                );
+
+        float totalScale =
+                baseScale * previewZoomScale;
+
+        float displayedWidth =
+                bitmapWidth * totalScale;
+        float displayedHeight =
+                bitmapHeight * totalScale;
+
+        float baseLeft =
+                (viewWidth - displayedWidth) / 2f;
+        float baseTop =
+                (viewHeight - displayedHeight) / 2f;
+
+        float requiredVisibleWidth =
+                Math.min(
+                        minVisibleImagePx,
+                        Math.min(
+                                displayedWidth,
+                                viewWidth
+                        )
+                );
+
+        float requiredVisibleHeight =
+                Math.min(
+                        minVisibleImagePx,
+                        Math.min(
+                                displayedHeight,
+                                viewHeight
+                        )
+                );
+
+        float minPanX =
+                requiredVisibleWidth
+                        - displayedWidth
+                        - baseLeft;
+        float maxPanX =
+                viewWidth
+                        - requiredVisibleWidth
+                        - baseLeft;
+
+        float minPanY =
+                requiredVisibleHeight
+                        - displayedHeight
+                        - baseTop;
+        float maxPanY =
+                viewHeight
+                        - requiredVisibleHeight
+                        - baseTop;
+
+        previewPanX =
+                clamp(
+                        previewPanX,
+                        minPanX,
+                        maxPanX
+                );
+        previewPanY =
+                clamp(
+                        previewPanY,
+                        minPanY,
+                        maxPanY
+                );
+    }
+
+    private void drawOutputBoundaryLines(
+            Canvas canvas
+    ) {
+        for (BoundaryPair pair : boundaryPairs) {
+            float outputX =
+                    clamp(pair.outputX, 0f, 1f);
+
+            float x =
+                    outputX * bitmap.getWidth();
+
+            PointF top =
+                    mapBitmapPointToView(x, 0f);
+            PointF bottom =
+                    mapBitmapPointToView(
+                            x,
+                            bitmap.getHeight()
+                    );
 
             canvas.drawLine(
                     top.x,
@@ -251,9 +524,11 @@ public class ResultPreviewView extends View {
                 getDisplayedBitmapRect();
 
         boolean insideVerticalRange =
-                viewY >= frameRect.top
+                viewY
+                        >= frameRect.top
                         - OUTPUT_FRAME_EDGE_HIT_RADIUS
-                        && viewY <= frameRect.bottom
+                        && viewY
+                        <= frameRect.bottom
                         + OUTPUT_FRAME_EDGE_HIT_RADIUS;
 
         if (!insideVerticalRange) {
@@ -264,7 +539,6 @@ public class ResultPreviewView extends View {
                 Math.abs(
                         viewX - frameRect.left
                 );
-
         float rightDistance =
                 Math.abs(
                         viewX - frameRect.right
@@ -273,7 +547,6 @@ public class ResultPreviewView extends View {
         boolean nearLeft =
                 leftDistance
                         <= OUTPUT_FRAME_EDGE_HIT_RADIUS;
-
         boolean nearRight =
                 rightDistance
                         <= OUTPUT_FRAME_EDGE_HIT_RADIUS;
@@ -302,23 +575,30 @@ public class ResultPreviewView extends View {
         }
 
         updateBitmapMatrix();
+        scaleGestureDetector.onTouchEvent(event);
+
+        if (event.getActionMasked()
+                == MotionEvent.ACTION_POINTER_DOWN) {
+            cancelSingleFingerOperationForScale();
+
+            getParent()
+                    .requestDisallowInterceptTouchEvent(
+                            true
+                    );
+        }
+
+        if (scaleGestureDetector.isInProgress()
+                || isScaling
+                || event.getPointerCount() > 1) {
+            invalidate();
+            return true;
+        }
 
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                int touchedEdge =
-                        findTouchedOutputFrameEdge(
-                                event.getX(),
-                                event.getY()
-                        );
-
-                if (touchedEdge
-                        == OUTPUT_FRAME_EDGE_NONE) {
-                    return false;
-                }
-
-                startOutputFrameEdgeDrag(
-                        touchedEdge,
-                        event.getX()
+                startSingleFingerOperation(
+                        event.getX(),
+                        event.getY()
                 );
 
                 getParent()
@@ -331,45 +611,122 @@ public class ResultPreviewView extends View {
 
             case MotionEvent.ACTION_MOVE:
                 if (draggingOutputFrameEdge
-                        == OUTPUT_FRAME_EDGE_NONE) {
-                    return false;
+                        != OUTPUT_FRAME_EDGE_NONE) {
+                    updateOutputFrameEdgeDrag(
+                            event.getX(),
+                            false
+                    );
+                } else {
+                    moveViewport(
+                            event.getX(),
+                            event.getY()
+                    );
                 }
-
-                updateOutputFrameEdgeDrag(
-                        event.getX(),
-                        false
-                );
 
                 return true;
 
             case MotionEvent.ACTION_UP:
                 if (draggingOutputFrameEdge
-                        == OUTPUT_FRAME_EDGE_NONE) {
-                    return false;
+                        != OUTPUT_FRAME_EDGE_NONE) {
+                    updateOutputFrameEdgeDrag(
+                            event.getX(),
+                            true
+                    );
+                    finishOutputFrameEdgeDrag();
+                } else {
+                    finishPan();
                 }
-
-                updateOutputFrameEdgeDrag(
-                        event.getX(),
-                        true
-                );
-
-                finishOutputFrameEdgeDrag();
 
                 performClick();
                 return true;
 
             case MotionEvent.ACTION_CANCEL:
                 if (draggingOutputFrameEdge
-                        == OUTPUT_FRAME_EDGE_NONE) {
-                    return false;
+                        != OUTPUT_FRAME_EDGE_NONE) {
+                    cancelOutputFrameEdgeDrag();
+                } else {
+                    finishPan();
                 }
 
-                cancelOutputFrameEdgeDrag();
                 return true;
 
             default:
-                return false;
+                return true;
         }
+    }
+
+    private void startSingleFingerOperation(
+            float viewX,
+            float viewY
+    ) {
+        int touchedEdge =
+                findTouchedOutputFrameEdge(
+                        viewX,
+                        viewY
+                );
+
+        if (touchedEdge
+                != OUTPUT_FRAME_EDGE_NONE) {
+            startOutputFrameEdgeDrag(
+                    touchedEdge,
+                    viewX
+            );
+            lastPanTouchPoint = null;
+            return;
+        }
+
+        lastPanTouchPoint =
+                new PointF(viewX, viewY);
+    }
+
+    private void cancelSingleFingerOperationForScale() {
+        if (draggingOutputFrameEdge
+                != OUTPUT_FRAME_EDGE_NONE) {
+            cancelOutputFrameEdgeDrag();
+        }
+
+        lastPanTouchPoint = null;
+    }
+
+    private void moveViewport(
+            float viewX,
+            float viewY
+    ) {
+        if (lastPanTouchPoint == null) {
+            lastPanTouchPoint =
+                    new PointF(viewX, viewY);
+            return;
+        }
+
+        float dx =
+                viewX - lastPanTouchPoint.x;
+        float dy =
+                viewY - lastPanTouchPoint.y;
+
+        previewPanX += dx;
+        previewPanY += dy;
+
+        constrainPan();
+        updateBitmapMatrix();
+
+        lastPanTouchPoint.x = viewX;
+        lastPanTouchPoint.y = viewY;
+
+        invalidate();
+    }
+
+    private void finishPan() {
+        lastPanTouchPoint = null;
+
+        constrainPan();
+        updateBitmapMatrix();
+
+        getParent()
+                .requestDisallowInterceptTouchEvent(
+                        false
+                );
+
+        invalidate();
     }
 
     private void startOutputFrameEdgeDrag(
@@ -379,10 +736,7 @@ public class ResultPreviewView extends View {
         RectF frameRect =
                 getDisplayedBitmapRect();
 
-        draggingOutputFrameRect.set(
-                frameRect
-        );
-
+        draggingOutputFrameRect.set(frameRect);
         draggingOutputFrameEdge = edge;
 
         float edgeX;
@@ -463,10 +817,11 @@ public class ResultPreviewView extends View {
                         .getStrokeWidth()
                         / 2f;
 
-        float minLeft = Math.max(
-                minLeftByAspectRatio,
-                minLeftByView
-        );
+        float minLeft =
+                Math.max(
+                        minLeftByAspectRatio,
+                        minLeftByView
+                );
 
         float maxLeft =
                 draggingOutputFrameRect.right
@@ -505,10 +860,11 @@ public class ResultPreviewView extends View {
                         .getStrokeWidth()
                         / 2f;
 
-        float maxRight = Math.min(
-                maxRightByAspectRatio,
-                maxRightByView
-        );
+        float maxRight =
+                Math.min(
+                        maxRightByAspectRatio,
+                        maxRightByView
+                );
 
         if (maxRight < minRight) {
             minRight = maxRight;
@@ -525,6 +881,8 @@ public class ResultPreviewView extends View {
     private void finishOutputFrameEdgeDrag() {
         draggingOutputFrameEdge =
                 OUTPUT_FRAME_EDGE_NONE;
+
+        lastPanTouchPoint = null;
 
         getParent()
                 .requestDisallowInterceptTouchEvent(
@@ -561,13 +919,44 @@ public class ResultPreviewView extends View {
         return true;
     }
 
-    private PointF mapBitmapPointToView(float x, float y) {
-        float[] values = new float[]{x, y};
+    private PointF mapBitmapPointToView(
+            float x,
+            float y
+    ) {
+        float[] values =
+                new float[]{x, y};
+
         bitmapToViewMatrix.mapPoints(values);
-        return new PointF(values[0], values[1]);
+
+        return new PointF(
+                values[0],
+                values[1]
+        );
     }
 
-    private float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
+    private PointF mapViewPointToBitmap(
+            float viewX,
+            float viewY
+    ) {
+        float[] values =
+                new float[]{viewX, viewY};
+
+        viewToBitmapMatrix.mapPoints(values);
+
+        return new PointF(
+                values[0],
+                values[1]
+        );
+    }
+
+    private float clamp(
+            float value,
+            float min,
+            float max
+    ) {
+        return Math.max(
+                min,
+                Math.min(max, value)
+        );
     }
 }
