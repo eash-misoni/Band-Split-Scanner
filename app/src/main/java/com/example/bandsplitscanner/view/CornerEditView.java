@@ -35,8 +35,10 @@ public class CornerEditView extends View {
 
     private static final float MIN_ZOOM = 1f;
     private static final float MAX_ZOOM = 5f;
+    private static final float MIN_VISIBLE_IMAGE_DP = 48f;
 
     private final Bitmap bitmap;
+    private final float minVisibleImagePx;
 
     private final Matrix imageToViewMatrix = new Matrix();
     private final Matrix viewToImageMatrix = new Matrix();
@@ -70,6 +72,7 @@ public class CornerEditView extends View {
     public CornerEditView(Context context, Bitmap bitmap) {
         super(context);
         this.bitmap = bitmap;
+        this.minVisibleImagePx = MIN_VISIBLE_IMAGE_DP * getResources().getDisplayMetrics().density;
 
         imagePaint.setFilterBitmap(true);
 
@@ -279,9 +282,7 @@ public class CornerEditView extends View {
     }
 
     private void constrainPan() {
-        if (bitmap == null
-                || getWidth() == 0
-                || getHeight() == 0) {
+        if (bitmap == null || getWidth() == 0 || getHeight() == 0) {
             return;
         }
 
@@ -296,36 +297,60 @@ public class CornerEditView extends View {
                 viewHeight / bitmapHeight
         );
 
-        float totalScale =
-                baseScale * zoomScale;
+        float totalScale = baseScale * zoomScale;
 
-        float displayedWidth =
-                bitmapWidth * totalScale;
+        float displayedWidth = bitmapWidth * totalScale;
+        float displayedHeight = bitmapHeight * totalScale;
 
-        float displayedHeight =
-                bitmapHeight * totalScale;
+        float baseLeft = (viewWidth - displayedWidth) / 2f;
+        float baseTop = (viewHeight - displayedHeight) / 2f;
 
-        float maxPanX = Math.max(
-                0f,
-                (displayedWidth - viewWidth) / 2f
+        /*
+         * 通常は48dpを最低可視量とする。
+         * ただし、画像またはView自体が48dpより小さい場合は、
+         * 実際に表示可能な長さを上限とする。
+         */
+        float requiredVisibleWidth = Math.min(
+                minVisibleImagePx,
+                Math.min(displayedWidth, viewWidth)
         );
 
-        float maxPanY = Math.max(
-                0f,
-                (displayedHeight - viewHeight) / 2f
+        float requiredVisibleHeight = Math.min(
+                minVisibleImagePx,
+                Math.min(displayedHeight, viewHeight)
         );
 
-        panX = clamp(
-                panX,
-                -maxPanX,
-                maxPanX
-        );
+        /*
+         * 表示画像の右端が requiredVisibleWidth より左へ行かず、
+         * 左端が viewWidth - requiredVisibleWidth より右へ行かない
+         * 範囲にpanXを制限する。
+         */
+        float minPanX =
+                requiredVisibleWidth
+                        - displayedWidth
+                        - baseLeft;
 
-        panY = clamp(
-                panY,
-                -maxPanY,
-                maxPanY
-        );
+        float maxPanX =
+                viewWidth
+                        - requiredVisibleWidth
+                        - baseLeft;
+
+        /*
+         * 縦方向も同様に、画像が最低 requiredVisibleHeight だけ
+         * View内へ残る範囲に制限する。
+         */
+        float minPanY =
+                requiredVisibleHeight
+                        - displayedHeight
+                        - baseTop;
+
+        float maxPanY =
+                viewHeight
+                        - requiredVisibleHeight
+                        - baseTop;
+
+        panX = clamp(panX, minPanX, maxPanX);
+        panY = clamp(panY, minPanY, maxPanY);
     }
 
     private float[] getCornerPointsInView() {
