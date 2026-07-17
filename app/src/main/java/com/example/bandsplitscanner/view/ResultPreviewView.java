@@ -37,11 +37,21 @@ public class ResultPreviewView extends View {
 
     private static final float MIN_OUTPUT_ASPECT_RATIO = 0.4f;
     private static final float MAX_OUTPUT_ASPECT_RATIO = 3.0f;
-    private static final float RIGHT_EDGE_HIT_RADIUS = 36f;
+    private static final int OUTPUT_FRAME_EDGE_NONE = 0;
+    private static final int OUTPUT_FRAME_EDGE_LEFT = 1;
+    private static final int OUTPUT_FRAME_EDGE_RIGHT = 2;
 
-    private final RectF draggingOutputFrameRect = new RectF();
-    private boolean draggingOutputFrameRightEdge = false;
-    private float rightEdgeTouchOffset = 0f;
+    private static final float OUTPUT_FRAME_EDGE_HIT_RADIUS =
+            36f;
+
+    private final RectF draggingOutputFrameRect =
+            new RectF();
+
+    private int draggingOutputFrameEdge =
+            OUTPUT_FRAME_EDGE_NONE;
+
+    private float edgeTouchOffset = 0f;
+
     private float dragStartAspectRatio = 1f;
     private OnOutputAspectRatioChangedListener outputAspectRatioChangedListener;
     private boolean showOutputBoundaryLines = true;
@@ -165,7 +175,8 @@ public class ResultPreviewView extends View {
     }
 
     private RectF getCurrentOutputFrameRect() {
-        if (draggingOutputFrameRightEdge) {
+        if (draggingOutputFrameEdge
+                != OUTPUT_FRAME_EDGE_NONE) {
             return new RectF(
                     draggingOutputFrameRect
             );
@@ -232,26 +243,56 @@ public class ResultPreviewView extends View {
         }
     }
 
-    private boolean isNearOutputFrameRightEdge(
+    private int findTouchedOutputFrameEdge(
             float viewX,
             float viewY
     ) {
         RectF frameRect =
                 getDisplayedBitmapRect();
 
-        boolean nearRight =
-                Math.abs(
-                        viewX - frameRect.right
-                ) <= RIGHT_EDGE_HIT_RADIUS;
-
         boolean insideVerticalRange =
                 viewY >= frameRect.top
-                        - RIGHT_EDGE_HIT_RADIUS
+                        - OUTPUT_FRAME_EDGE_HIT_RADIUS
                         && viewY <= frameRect.bottom
-                        + RIGHT_EDGE_HIT_RADIUS;
+                        + OUTPUT_FRAME_EDGE_HIT_RADIUS;
 
-        return nearRight
-                && insideVerticalRange;
+        if (!insideVerticalRange) {
+            return OUTPUT_FRAME_EDGE_NONE;
+        }
+
+        float leftDistance =
+                Math.abs(
+                        viewX - frameRect.left
+                );
+
+        float rightDistance =
+                Math.abs(
+                        viewX - frameRect.right
+                );
+
+        boolean nearLeft =
+                leftDistance
+                        <= OUTPUT_FRAME_EDGE_HIT_RADIUS;
+
+        boolean nearRight =
+                rightDistance
+                        <= OUTPUT_FRAME_EDGE_HIT_RADIUS;
+
+        if (nearLeft && nearRight) {
+            return leftDistance <= rightDistance
+                    ? OUTPUT_FRAME_EDGE_LEFT
+                    : OUTPUT_FRAME_EDGE_RIGHT;
+        }
+
+        if (nearLeft) {
+            return OUTPUT_FRAME_EDGE_LEFT;
+        }
+
+        if (nearRight) {
+            return OUTPUT_FRAME_EDGE_RIGHT;
+        }
+
+        return OUTPUT_FRAME_EDGE_NONE;
     }
 
     @Override
@@ -264,14 +305,19 @@ public class ResultPreviewView extends View {
 
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                if (!isNearOutputFrameRightEdge(
-                        event.getX(),
-                        event.getY()
-                )) {
+                int touchedEdge =
+                        findTouchedOutputFrameEdge(
+                                event.getX(),
+                                event.getY()
+                        );
+
+                if (touchedEdge
+                        == OUTPUT_FRAME_EDGE_NONE) {
                     return false;
                 }
 
-                startRightEdgeDrag(
+                startOutputFrameEdgeDrag(
+                        touchedEdge,
                         event.getX()
                 );
 
@@ -284,11 +330,12 @@ public class ResultPreviewView extends View {
                 return true;
 
             case MotionEvent.ACTION_MOVE:
-                if (!draggingOutputFrameRightEdge) {
+                if (draggingOutputFrameEdge
+                        == OUTPUT_FRAME_EDGE_NONE) {
                     return false;
                 }
 
-                updateRightEdgeDrag(
+                updateOutputFrameEdgeDrag(
                         event.getX(),
                         false
                 );
@@ -296,26 +343,28 @@ public class ResultPreviewView extends View {
                 return true;
 
             case MotionEvent.ACTION_UP:
-                if (!draggingOutputFrameRightEdge) {
+                if (draggingOutputFrameEdge
+                        == OUTPUT_FRAME_EDGE_NONE) {
                     return false;
                 }
 
-                updateRightEdgeDrag(
+                updateOutputFrameEdgeDrag(
                         event.getX(),
                         true
                 );
 
-                finishRightEdgeDrag();
+                finishOutputFrameEdgeDrag();
 
                 performClick();
                 return true;
 
             case MotionEvent.ACTION_CANCEL:
-                if (!draggingOutputFrameRightEdge) {
+                if (draggingOutputFrameEdge
+                        == OUTPUT_FRAME_EDGE_NONE) {
                     return false;
                 }
 
-                cancelRightEdgeDrag();
+                cancelOutputFrameEdgeDrag();
                 return true;
 
             default:
@@ -323,7 +372,8 @@ public class ResultPreviewView extends View {
         }
     }
 
-    private void startRightEdgeDrag(
+    private void startOutputFrameEdgeDrag(
+            int edge,
             float touchX
     ) {
         RectF frameRect =
@@ -333,21 +383,30 @@ public class ResultPreviewView extends View {
                 frameRect
         );
 
-        draggingOutputFrameRightEdge = true;
+        draggingOutputFrameEdge = edge;
 
-        rightEdgeTouchOffset =
-                frameRect.right - touchX;
+        float edgeX;
+
+        if (edge == OUTPUT_FRAME_EDGE_LEFT) {
+            edgeX = frameRect.left;
+        } else {
+            edgeX = frameRect.right;
+        }
+
+        edgeTouchOffset =
+                edgeX - touchX;
 
         dragStartAspectRatio =
                 frameRect.width()
                         / frameRect.height();
     }
 
-    private void updateRightEdgeDrag(
+    private void updateOutputFrameEdgeDrag(
             float touchX,
             boolean isFinished
     ) {
-        if (!draggingOutputFrameRightEdge) {
+        if (draggingOutputFrameEdge
+                == OUTPUT_FRAME_EDGE_NONE) {
             return;
         }
 
@@ -358,6 +417,78 @@ public class ResultPreviewView extends View {
             return;
         }
 
+        float requestedEdgeX =
+                touchX + edgeTouchOffset;
+
+        if (draggingOutputFrameEdge
+                == OUTPUT_FRAME_EDGE_LEFT) {
+            updateLeftEdge(
+                    requestedEdgeX,
+                    frameHeight
+            );
+        } else {
+            updateRightEdge(
+                    requestedEdgeX,
+                    frameHeight
+            );
+        }
+
+        float aspectRatio =
+                draggingOutputFrameRect.width()
+                        / frameHeight;
+
+        if (outputAspectRatioChangedListener
+                != null) {
+            outputAspectRatioChangedListener
+                    .onOutputAspectRatioChanged(
+                            aspectRatio,
+                            isFinished
+                    );
+        }
+
+        invalidate();
+    }
+
+    private void updateLeftEdge(
+            float requestedLeft,
+            float frameHeight
+    ) {
+        float minLeftByAspectRatio =
+                draggingOutputFrameRect.right
+                        - frameHeight
+                        * MAX_OUTPUT_ASPECT_RATIO;
+
+        float minLeftByView =
+                outputFramePaint
+                        .getStrokeWidth()
+                        / 2f;
+
+        float minLeft = Math.max(
+                minLeftByAspectRatio,
+                minLeftByView
+        );
+
+        float maxLeft =
+                draggingOutputFrameRect.right
+                        - frameHeight
+                        * MIN_OUTPUT_ASPECT_RATIO;
+
+        if (minLeft > maxLeft) {
+            maxLeft = minLeft;
+        }
+
+        draggingOutputFrameRect.left =
+                clamp(
+                        requestedLeft,
+                        minLeft,
+                        maxLeft
+                );
+    }
+
+    private void updateRightEdge(
+            float requestedRight,
+            float frameHeight
+    ) {
         float minRight =
                 draggingOutputFrameRect.left
                         + frameHeight
@@ -383,33 +514,17 @@ public class ResultPreviewView extends View {
             minRight = maxRight;
         }
 
-        float requestedRight =
-                touchX + rightEdgeTouchOffset;
-
         draggingOutputFrameRect.right =
                 clamp(
                         requestedRight,
                         minRight,
                         maxRight
                 );
-
-        float aspectRatio =
-                draggingOutputFrameRect.width()
-                        / frameHeight;
-
-        if (outputAspectRatioChangedListener != null) {
-            outputAspectRatioChangedListener
-                    .onOutputAspectRatioChanged(
-                            aspectRatio,
-                            isFinished
-                    );
-        }
-
-        invalidate();
     }
 
-    private void finishRightEdgeDrag() {
-        draggingOutputFrameRightEdge = false;
+    private void finishOutputFrameEdgeDrag() {
+        draggingOutputFrameEdge =
+                OUTPUT_FRAME_EDGE_NONE;
 
         getParent()
                 .requestDisallowInterceptTouchEvent(
@@ -419,10 +534,12 @@ public class ResultPreviewView extends View {
         invalidate();
     }
 
-    private void cancelRightEdgeDrag() {
-        draggingOutputFrameRightEdge = false;
+    private void cancelOutputFrameEdgeDrag() {
+        draggingOutputFrameEdge =
+                OUTPUT_FRAME_EDGE_NONE;
 
-        if (outputAspectRatioChangedListener != null) {
+        if (outputAspectRatioChangedListener
+                != null) {
             outputAspectRatioChangedListener
                     .onOutputAspectRatioChanged(
                             dragStartAspectRatio,
