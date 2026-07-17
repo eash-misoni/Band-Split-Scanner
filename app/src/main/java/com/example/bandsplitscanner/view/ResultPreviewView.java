@@ -807,30 +807,15 @@ public class ResultPreviewView extends View {
             float requestedLeft,
             float frameHeight
     ) {
-        float minLeftByAspectRatio =
+        float minLeft =
                 draggingOutputFrameRect.right
                         - frameHeight
                         * MAX_OUTPUT_ASPECT_RATIO;
-
-        float minLeftByView =
-                outputFramePaint
-                        .getStrokeWidth()
-                        / 2f;
-
-        float minLeft =
-                Math.max(
-                        minLeftByAspectRatio,
-                        minLeftByView
-                );
 
         float maxLeft =
                 draggingOutputFrameRect.right
                         - frameHeight
                         * MIN_OUTPUT_ASPECT_RATIO;
-
-        if (minLeft > maxLeft) {
-            maxLeft = minLeft;
-        }
 
         draggingOutputFrameRect.left =
                 clamp(
@@ -849,26 +834,10 @@ public class ResultPreviewView extends View {
                         + frameHeight
                         * MIN_OUTPUT_ASPECT_RATIO;
 
-        float maxRightByAspectRatio =
+        float maxRight =
                 draggingOutputFrameRect.left
                         + frameHeight
                         * MAX_OUTPUT_ASPECT_RATIO;
-
-        float maxRightByView =
-                getWidth()
-                        - outputFramePaint
-                        .getStrokeWidth()
-                        / 2f;
-
-        float maxRight =
-                Math.min(
-                        maxRightByAspectRatio,
-                        maxRightByView
-                );
-
-        if (maxRight < minRight) {
-            minRight = maxRight;
-        }
 
         draggingOutputFrameRect.right =
                 clamp(
