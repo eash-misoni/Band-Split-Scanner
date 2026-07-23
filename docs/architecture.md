@@ -1,6 +1,6 @@
 # Band Split Scanner アーキテクチャ設計書
 
-更新日: 2026-07-17
+更新日: 2026-07-23
 
 ## 1. このドキュメントの目的
 
@@ -71,6 +71,7 @@ MainActivity
 ├ WidthDistributionBarViewとの同期
 ├ BandCorrectionEngine呼び出し
 ├ ResultPreviewView生成・表示
+├ 現在のcorrectedBitmapをMediaStoreへ保存
 └ 元画像編集画面と結果画面の切り替え
 ```
 
@@ -153,6 +154,11 @@ com.example.bandsplitscanner
 - 補正結果をResultPreviewViewへ設定する
 - 出力外枠の縦横比変更イベントを受け取る
 - ドラッグ終了時に補正プレビューを再生成する
+- 保存ボタンの表示状態と有効状態を管理する
+- Android 9以前のWRITE_EXTERNAL_STORAGE権限要求を行う
+- correctedBitmapをJPEG品質95で圧縮する
+- MediaStoreへ保存し、Android 10以降ではPictures/BandSplitScannerへ公開する
+- 保存成功・失敗をToastで通知する
 ```
 
 境界追加時には、新しい `outputX` の左右に隣接する境界を求め、入力側の上端点と下端点をそれぞれ線形補間して、新しい `BoundaryPair` を生成する。
@@ -771,6 +777,45 @@ imageRect.top    <= viewHeight - minimumVisibleHeight
 
 ---
 
+### 7.10 補正結果の保存
+
+現在の最小保存経路は以下。
+
+```text
+ユーザーが保存ボタンを押す
+↓
+MainActivity
+↓
+現在のcorrectedBitmapを取得
+↓
+JPEG品質95で圧縮
+↓
+MediaStoreへ登録
+↓
+Android 10以降
+├ RELATIVE_PATH = Pictures/BandSplitScanner
+└ IS_PENDINGを解除して公開
+↓
+Android 9以前
+└ WRITE_EXTERNAL_STORAGE権限を確認して保存
+```
+
+保存対象は `correctedBitmap` だけであり、`ResultPreviewView` のCanvasへ描画している次の表示要素は保存対象に含めない。
+
+```text
+- 出力境界線
+- 出力外枠
+- ズーム・パンによる表示変換
+```
+
+幅配分バーと境界マーカーも別Viewであるため、保存画像には含まれない。
+
+保存途中で失敗した場合は、挿入済みのMediaStore項目を削除する。
+
+この経路は保存方法を検証するための暫定実装であり、保存画像は幅 `1200px` のプレビュー用 `correctedBitmap` である。保存時の高解像度再生成は別段階で実装する。
+
+---
+
 ## 8. 座標系
 
 本アプリでは、以下の座標系を明確に区別する。
@@ -1009,7 +1054,11 @@ MainActivity
 
 画像選択時に原画像をBitmapへ読み込んでいる。
 
-これは検証版では許容する。
+補正結果の確認時には、幅 `1200px` の `correctedBitmap` を生成する。
+
+現在の保存処理は、この `correctedBitmap` をMainActivityがJPEGへ圧縮してMediaStoreへ保存する。
+
+これは保存経路を確認する検証版として許容するが、プレビュー表示用Bitmapと最終保存用Bitmapはまだ分離されていない。
 
 ---
 
@@ -1142,14 +1191,15 @@ View同士を直接同期元にしない。
 
 現在のMainActivity中心構成を維持したまま、MVP操作を完成させる。
 
-境界追加・削除、補正前・補正後画面のズーム・パン、両画面の最低48dp可視制約、出力境界線表示切り替え、出力外枠表示、View端に依存しない左右辺ドラッグによる縦横比変更は実装済み。
+境界追加・削除、補正前・補正後画面のズーム・パン、両画面の最低48dp可視制約、出力境界線表示切り替え、出力外枠表示、View端に依存しない左右辺ドラッグによる縦横比変更、現在のプレビュー用補正BitmapのMediaStore保存は実装済み。
 
 残る主な作業は以下。
 
 ```text
-- 補正画像の保存
+- 保存時の保存用Bitmap再生成
 - 必要に応じた低解像度プレビュー生成
 - 保存用高解像度画像の再読込
+- 画像入出力責務の分離
 - 状態管理の段階的な分離
 ```
 
@@ -1354,8 +1404,10 @@ View座標は端末サイズ、向き、ズーム、パンで変化する。
 - 補正前・補正後のパンとピンチに最低48dp可視制約を適用できている
 - 補正後Bitmap、出力境界線、出力外枠へ共通の表示変換を適用できている
 - 出力外枠の操作範囲をView端から分離し、縦横比制約だけで決定できている
+- 補正Bitmapと編集用オーバーレイを分離したままMediaStoreへ保存できている
+- Androidのバージョン差を考慮した最小保存経路を確認できている
 ```
 
-今後の大きな設計課題は、MainActivityとCornerEditViewに集中している状態管理を、保存・高解像度画像対応・画面分割のタイミングで段階的に外へ出すことである。
+今後の大きな設計課題は、MainActivityとCornerEditViewに集中している状態管理と、MainActivityへ追加された画像保存責務を、高解像度画像対応・撮影・画面分割のタイミングで段階的に外へ出すことである。
 
-現段階では、最終構成への一括リファクタリングより、補正画像の保存とプレビュー用画像・保存用画像の分離を検証しながら、必要な単位で責務分離を進める。
+現段階では、最終構成への一括リファクタリングより、保存用Bitmapの再生成、プレビュー用画像・保存用画像の分離、ImageLoader / ImageSaverへの画像入出力分離を検証しながら、必要な単位で責務分離を進める。
