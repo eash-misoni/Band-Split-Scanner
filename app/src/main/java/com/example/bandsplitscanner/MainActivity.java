@@ -42,6 +42,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -49,6 +50,7 @@ import java.util.Locale;
 public class MainActivity extends AppCompatActivity {
 
     private static final int PREVIEW_OUTPUT_WIDTH = 1200;
+    private static final int PREVIEW_SOURCE_MAX_EDGE = 2048;
     private static final long SAVE_MAX_OUTPUT_PIXELS = 4_000_000L;
     private static final int SAVE_MAX_OUTPUT_EDGE = 4096;
     private static final int SAVE_JPEG_QUALITY = 95;
@@ -63,6 +65,8 @@ public class MainActivity extends AppCompatActivity {
     private SwitchCompat outputBoundarySwitch;
 
     private Uri selectedImageUri;
+    private int selectedImageWidth;
+    private int selectedImageHeight;
     private Bitmap sourceBitmap;
     private Bitmap correctedBitmap;
 
@@ -84,10 +88,22 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         try {
+                            BitmapFactory.Options imageBounds =
+                                    readBitmapBounds(uri);
+                            int previewInSampleSize =
+                                    calculatePreviewInSampleSize(
+                                            imageBounds.outWidth,
+                                            imageBounds.outHeight
+                                    );
                             Bitmap selectedBitmap =
-                                    loadBitmapFromUri(uri);
+                                    loadBitmapFromUri(
+                                            uri,
+                                            previewInSampleSize
+                                    );
 
                             selectedImageUri = uri;
+                            selectedImageWidth = imageBounds.outWidth;
+                            selectedImageHeight = imageBounds.outHeight;
                             sourceBitmap = selectedBitmap;
                             correctedBitmap = null;
 
@@ -416,25 +432,45 @@ public class MainActivity extends AppCompatActivity {
 
     private Bitmap createSaveBitmap() throws IOException {
         Bitmap saveSourceBitmap =
-                loadBitmapFromUri(selectedImageUri);
+                loadBitmapFromUri(
+                        selectedImageUri,
+                        1
+                );
 
         try {
             validateSaveSourceDimensions(saveSourceBitmap);
 
-            PageCorners corners =
-                    cornerEditView.getPageCorners();
-            List<BoundaryPair> boundaryPairs =
-                    cornerEditView.getBoundaryPairs();
+            float scaleX =
+                    saveSourceBitmap.getWidth()
+                            / (float) sourceBitmap.getWidth();
+            float scaleY =
+                    saveSourceBitmap.getHeight()
+                            / (float) sourceBitmap.getHeight();
+
+            PageCorners saveCorners =
+                    scalePageCorners(
+                            cornerEditView.getPageCorners(),
+                            scaleX,
+                            scaleY
+                    );
+            List<BoundaryPair> saveBoundaryPairs =
+                    scaleBoundaryPairs(
+                            cornerEditView.getBoundaryPairs(),
+                            scaleX,
+                            scaleY
+                    );
 
             if (Float.isNaN(outputAspectRatio)
                     || Float.isInfinite(outputAspectRatio)
                     || outputAspectRatio <= 0f) {
                 outputAspectRatio =
-                        BandCorrectionMath.estimateAspectRatio(corners);
+                        BandCorrectionMath.estimateAspectRatio(
+                                saveCorners
+                        );
             }
 
             OutputSettings settings =
-                    createSaveOutputSettings(corners);
+                    createSaveOutputSettings(saveCorners);
 
             BandCorrectionEngine engine =
                     new BandCorrectionEngine(
@@ -443,8 +479,8 @@ public class MainActivity extends AppCompatActivity {
 
             return engine.createResult(
                     saveSourceBitmap,
-                    corners,
-                    boundaryPairs,
+                    saveCorners,
+                    saveBoundaryPairs,
                     settings
             );
         } finally {
@@ -454,9 +490,63 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private Bitmap loadBitmapFromUri(
+    private BitmapFactory.Options readBitmapBounds(
             Uri imageUri
     ) throws IOException {
+        BitmapFactory.Options options =
+                new BitmapFactory.Options();
+        options.inJustDecodeBounds = true;
+
+        try (InputStream inputStream =
+                     getContentResolver().openInputStream(imageUri)) {
+            if (inputStream == null) {
+                throw new IOException(
+                        "画像の入力ストリームを開けませんでした"
+                );
+            }
+
+            BitmapFactory.decodeStream(
+                    inputStream,
+                    null,
+                    options
+            );
+        }
+
+        if (options.outWidth <= 0
+                || options.outHeight <= 0) {
+            throw new IOException(
+                    "画像サイズを取得できませんでした"
+            );
+        }
+
+        return options;
+    }
+
+    private int calculatePreviewInSampleSize(
+            int imageWidth,
+            int imageHeight
+    ) {
+        int inSampleSize = 1;
+        int longestEdge =
+                Math.max(imageWidth, imageHeight);
+
+        while (longestEdge / inSampleSize
+                > PREVIEW_SOURCE_MAX_EDGE) {
+            inSampleSize *= 2;
+        }
+
+        return inSampleSize;
+    }
+
+    private Bitmap loadBitmapFromUri(
+            Uri imageUri,
+            int inSampleSize
+    ) throws IOException {
+        BitmapFactory.Options options =
+                new BitmapFactory.Options();
+        options.inSampleSize =
+                Math.max(1, inSampleSize);
+
         try (InputStream inputStream =
                      getContentResolver().openInputStream(imageUri)) {
             if (inputStream == null) {
@@ -466,7 +556,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             Bitmap bitmap =
-                    BitmapFactory.decodeStream(inputStream);
+                    BitmapFactory.decodeStream(
+                            inputStream,
+                            null,
+                            options
+                    );
             if (bitmap == null) {
                 throw new IOException(
                         "画像をBitmapとして読み込めませんでした"
@@ -481,13 +575,67 @@ public class MainActivity extends AppCompatActivity {
             Bitmap saveSourceBitmap
     ) throws IOException {
         if (saveSourceBitmap.getWidth()
-                != sourceBitmap.getWidth()
+                != selectedImageWidth
                 || saveSourceBitmap.getHeight()
-                != sourceBitmap.getHeight()) {
+                != selectedImageHeight) {
             throw new IOException(
-                    "保存時に再読込した画像サイズが編集時と一致しません"
+                    "保存時に再読込した画像サイズが選択時と一致しません"
             );
         }
+    }
+
+    private PageCorners scalePageCorners(
+            PageCorners corners,
+            float scaleX,
+            float scaleY
+    ) {
+        return new PageCorners(
+                scalePoint(corners.topLeft, scaleX, scaleY),
+                scalePoint(corners.topRight, scaleX, scaleY),
+                scalePoint(corners.bottomRight, scaleX, scaleY),
+                scalePoint(corners.bottomLeft, scaleX, scaleY)
+        );
+    }
+
+    private List<BoundaryPair> scaleBoundaryPairs(
+            List<BoundaryPair> boundaryPairs,
+            float scaleX,
+            float scaleY
+    ) {
+        List<BoundaryPair> scaledPairs =
+                new ArrayList<>(boundaryPairs.size());
+
+        for (BoundaryPair pair : boundaryPairs) {
+            scaledPairs.add(
+                    new BoundaryPair(
+                            pair.id,
+                            pair.outputX,
+                            scalePoint(
+                                    pair.inputTop,
+                                    scaleX,
+                                    scaleY
+                            ),
+                            scalePoint(
+                                    pair.inputBottom,
+                                    scaleX,
+                                    scaleY
+                            )
+                    )
+            );
+        }
+
+        return scaledPairs;
+    }
+
+    private PointF scalePoint(
+            PointF point,
+            float scaleX,
+            float scaleY
+    ) {
+        return new PointF(
+                point.x * scaleX,
+                point.y * scaleY
+        );
     }
 
     private OutputSettings createSaveOutputSettings(
