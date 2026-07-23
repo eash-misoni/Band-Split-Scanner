@@ -46,6 +46,8 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -74,9 +76,13 @@ public class MainActivity extends AppCompatActivity {
     private WidthDistributionBarView widthDistributionBarView;
     private ResultPreviewView resultPreviewView;
 
+    private final ExecutorService saveExecutor =
+            Executors.newSingleThreadExecutor();
+
     private float outputAspectRatio = Float.NaN;
     private boolean showingResult = false;
     private boolean showOutputBoundaryLines = true;
+    private boolean saveInProgress = false;
     private long nextBoundaryId = 1L;
 
     private final ActivityResultLauncher<String> imagePickerLauncher =
@@ -399,78 +405,188 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveCurrentResult() {
-        Bitmap bitmapToSave = null;
+        if (saveInProgress) {
+            return;
+        }
+
+        SaveRequest saveRequest =
+                createSaveRequest();
+
+        saveInProgress = true;
         saveButton.setEnabled(false);
 
+        Toast.makeText(
+                this,
+                "画像を保存しています",
+                Toast.LENGTH_SHORT
+        ).show();
+
+        saveExecutor.execute(
+                () -> {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND
+                    );
+                    executeSave(saveRequest);
+                }
+        );
+    }
+
+    private SaveRequest createSaveRequest() {
+        return new SaveRequest(
+                selectedImageUri,
+                selectedImageWidth,
+                selectedImageHeight,
+                sourceBitmap.getWidth(),
+                sourceBitmap.getHeight(),
+                cornerEditView.getPageCorners(),
+                cornerEditView.getBoundaryPairs(),
+                outputAspectRatio
+        );
+    }
+
+    private void executeSave(
+            SaveRequest saveRequest
+    ) {
+        Bitmap bitmapToSave = null;
+
         try {
-            bitmapToSave = createSaveBitmap();
+            bitmapToSave =
+                    createSaveBitmap(saveRequest);
             saveBitmapToMediaStore(bitmapToSave);
-            showSaveCompletedMessage(bitmapToSave);
+
+            int savedWidth =
+                    bitmapToSave.getWidth();
+            int savedHeight =
+                    bitmapToSave.getHeight();
+
+            postSaveCompleted(
+                    savedWidth,
+                    savedHeight
+            );
         } catch (OutOfMemoryError e) {
-            Toast.makeText(
-                    this,
+            postSaveFailed(
                     "保存画像を生成するためのメモリが不足しました",
                     Toast.LENGTH_LONG
-            ).show();
+            );
         } catch (Exception e) {
-            Toast.makeText(
-                    this,
+            postSaveFailed(
                     "画像の保存に失敗しました",
                     Toast.LENGTH_SHORT
-            ).show();
+            );
         } finally {
             if (bitmapToSave != null
                     && !bitmapToSave.isRecycled()) {
                 bitmapToSave.recycle();
             }
+        }
+    }
 
+    private void postSaveCompleted(
+            int savedWidth,
+            int savedHeight
+    ) {
+        runOnUiThread(
+                () -> {
+                    finishSaveOperation();
+
+                    if (isFinishing()
+                            || isDestroyed()) {
+                        return;
+                    }
+
+                    showSaveCompletedMessage(
+                            savedWidth,
+                            savedHeight
+                    );
+                }
+        );
+    }
+
+    private void postSaveFailed(
+            String message,
+            int duration
+    ) {
+        runOnUiThread(
+                () -> {
+                    finishSaveOperation();
+
+                    if (isFinishing()
+                            || isDestroyed()) {
+                        return;
+                    }
+
+                    Toast.makeText(
+                            this,
+                            message,
+                            duration
+                    ).show();
+                }
+        );
+    }
+
+    private void finishSaveOperation() {
+        saveInProgress = false;
+
+        if (saveButton != null) {
             saveButton.setEnabled(
-                    showingResult && correctedBitmap != null
+                    showingResult
+                            && correctedBitmap != null
             );
         }
     }
 
-    private Bitmap createSaveBitmap() throws IOException {
+    private Bitmap createSaveBitmap(
+            SaveRequest saveRequest
+    ) throws IOException {
         Bitmap saveSourceBitmap =
                 loadBitmapFromUri(
-                        selectedImageUri,
+                        saveRequest.imageUri,
                         1
                 );
 
         try {
-            validateSaveSourceDimensions(saveSourceBitmap);
+            validateSaveSourceDimensions(
+                    saveSourceBitmap,
+                    saveRequest.originalImageWidth,
+                    saveRequest.originalImageHeight
+            );
 
             float scaleX =
                     saveSourceBitmap.getWidth()
-                            / (float) sourceBitmap.getWidth();
+                            / (float) saveRequest.previewImageWidth;
             float scaleY =
                     saveSourceBitmap.getHeight()
-                            / (float) sourceBitmap.getHeight();
+                            / (float) saveRequest.previewImageHeight;
 
             PageCorners saveCorners =
                     scalePageCorners(
-                            cornerEditView.getPageCorners(),
+                            saveRequest.previewCorners,
                             scaleX,
                             scaleY
                     );
             List<BoundaryPair> saveBoundaryPairs =
                     scaleBoundaryPairs(
-                            cornerEditView.getBoundaryPairs(),
+                            saveRequest.previewBoundaryPairs,
                             scaleX,
                             scaleY
                     );
 
-            if (Float.isNaN(outputAspectRatio)
-                    || Float.isInfinite(outputAspectRatio)
-                    || outputAspectRatio <= 0f) {
-                outputAspectRatio =
+            float saveOutputAspectRatio =
+                    saveRequest.outputAspectRatio;
+            if (Float.isNaN(saveOutputAspectRatio)
+                    || Float.isInfinite(saveOutputAspectRatio)
+                    || saveOutputAspectRatio <= 0f) {
+                saveOutputAspectRatio =
                         BandCorrectionMath.estimateAspectRatio(
                                 saveCorners
                         );
             }
 
             OutputSettings settings =
-                    createSaveOutputSettings(saveCorners);
+                    createSaveOutputSettings(
+                            saveCorners,
+                            saveOutputAspectRatio
+                    );
 
             BandCorrectionEngine engine =
                     new BandCorrectionEngine(
@@ -572,12 +688,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void validateSaveSourceDimensions(
-            Bitmap saveSourceBitmap
+            Bitmap saveSourceBitmap,
+            int expectedWidth,
+            int expectedHeight
     ) throws IOException {
         if (saveSourceBitmap.getWidth()
-                != selectedImageWidth
+                != expectedWidth
                 || saveSourceBitmap.getHeight()
-                != selectedImageHeight) {
+                != expectedHeight) {
             throw new IOException(
                     "保存時に再読込した画像サイズが選択時と一致しません"
             );
@@ -639,7 +757,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private OutputSettings createSaveOutputSettings(
-            PageCorners corners
+            PageCorners corners,
+            float aspectRatio
     ) {
         float topWidth =
                 BandCorrectionMath.distance(
@@ -658,7 +777,7 @@ public class MainActivity extends AppCompatActivity {
         );
         int outputHeight = Math.max(
                 1,
-                Math.round(outputWidth / outputAspectRatio)
+                Math.round(outputWidth / aspectRatio)
         );
 
         float scale = 1f;
@@ -817,7 +936,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showSaveCompletedMessage(
-            Bitmap savedBitmap
+            int savedWidth,
+            int savedHeight
     ) {
         String saveLocation;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -832,12 +952,57 @@ public class MainActivity extends AppCompatActivity {
                 this,
                 saveLocation
                         + " に "
-                        + savedBitmap.getWidth()
+                        + savedWidth
                         + " × "
-                        + savedBitmap.getHeight()
+                        + savedHeight
                         + " px で保存しました",
                 Toast.LENGTH_LONG
         ).show();
+    }
+
+    @Override
+    protected void onDestroy() {
+        saveExecutor.shutdownNow();
+        super.onDestroy();
+    }
+
+    private static class SaveRequest {
+
+        final Uri imageUri;
+        final int originalImageWidth;
+        final int originalImageHeight;
+        final int previewImageWidth;
+        final int previewImageHeight;
+        final PageCorners previewCorners;
+        final List<BoundaryPair> previewBoundaryPairs;
+        final float outputAspectRatio;
+
+        SaveRequest(
+                Uri imageUri,
+                int originalImageWidth,
+                int originalImageHeight,
+                int previewImageWidth,
+                int previewImageHeight,
+                PageCorners previewCorners,
+                List<BoundaryPair> previewBoundaryPairs,
+                float outputAspectRatio
+        ) {
+            this.imageUri = imageUri;
+            this.originalImageWidth =
+                    originalImageWidth;
+            this.originalImageHeight =
+                    originalImageHeight;
+            this.previewImageWidth =
+                    previewImageWidth;
+            this.previewImageHeight =
+                    previewImageHeight;
+            this.previewCorners =
+                    previewCorners;
+            this.previewBoundaryPairs =
+                    previewBoundaryPairs;
+            this.outputAspectRatio =
+                    outputAspectRatio;
+        }
     }
 
     private void applyOutputXFromWidthBar(BoundaryMarker marker) {

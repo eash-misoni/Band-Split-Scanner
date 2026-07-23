@@ -2,7 +2,6 @@ package com.example.bandsplitscanner.correction;
 
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.PointF;
 
 import com.example.bandsplitscanner.model.BoundaryLine;
 import com.example.bandsplitscanner.model.OutputSettings;
@@ -30,68 +29,154 @@ public class ScanlineBandRenderer implements BandRenderer {
         int sourceWidth = source.getWidth();
         int sourceHeight = source.getHeight();
 
-        int[] sourcePixels = new int[sourceWidth * sourceHeight];
-        source.getPixels(sourcePixels, 0, sourceWidth, 0, 0, sourceWidth, sourceHeight);
+        int[] sourcePixels =
+                new int[sourceWidth * sourceHeight];
+        source.getPixels(
+                sourcePixels,
+                0,
+                sourceWidth,
+                0,
+                0,
+                sourceWidth,
+                sourceHeight
+        );
 
-        int[] outputPixels = new int[outputWidth * outputHeight];
+        int[] outputPixels =
+                new int[outputWidth * outputHeight];
         Arrays.fill(outputPixels, Color.WHITE);
 
         for (int i = 0; i < boundaries.size() - 1; i++) {
             BoundaryLine left = boundaries.get(i);
             BoundaryLine right = boundaries.get(i + 1);
 
-            int xStart = Math.round(left.outputX * outputWidth);
-            int xEnd = Math.round(right.outputX * outputWidth);
+            int xStart =
+                    Math.round(left.outputX * outputWidth);
+            int xEnd =
+                    Math.round(right.outputX * outputWidth);
 
-            xStart = BandCorrectionMath.clamp(xStart, 0, outputWidth);
-            xEnd = BandCorrectionMath.clamp(xEnd, 0, outputWidth);
+            xStart = BandCorrectionMath.clamp(
+                    xStart,
+                    0,
+                    outputWidth
+            );
+            xEnd = BandCorrectionMath.clamp(
+                    xEnd,
+                    0,
+                    outputWidth
+            );
 
             if (i == boundaries.size() - 2) {
                 xEnd = outputWidth;
             }
 
-            if (xEnd <= xStart || !BandCorrectionMath.isValidBand(left, right)) {
-                fillBand(outputPixels, outputWidth, outputHeight, xStart, xEnd, Color.MAGENTA);
+            if (xEnd <= xStart
+                    || !BandCorrectionMath.isValidBand(
+                    left,
+                    right
+            )) {
+                fillBand(
+                        outputPixels,
+                        outputWidth,
+                        outputHeight,
+                        xStart,
+                        xEnd,
+                        Color.MAGENTA
+                );
                 continue;
             }
 
-            float leftOutputX = left.outputX * outputWidth;
-            float rightOutputX = right.outputX * outputWidth;
-            float bandWidth = rightOutputX - leftOutputX;
+            float leftOutputX =
+                    left.outputX * outputWidth;
+            float rightOutputX =
+                    right.outputX * outputWidth;
+            float bandWidth =
+                    rightOutputX - leftOutputX;
 
             if (bandWidth <= 0f) {
-                fillBand(outputPixels, outputWidth, outputHeight, xStart, xEnd, Color.MAGENTA);
+                fillBand(
+                        outputPixels,
+                        outputWidth,
+                        outputHeight,
+                        xStart,
+                        xEnd,
+                        Color.MAGENTA
+                );
                 continue;
             }
 
-            for (int y = 0; y < outputHeight; y++) {
-                float v = outputHeight == 1
-                        ? 0f
-                        : y / (float) (outputHeight - 1);
+            float leftTopX = left.inputTop.x;
+            float leftTopY = left.inputTop.y;
+            float leftDeltaX =
+                    left.inputBottom.x - leftTopX;
+            float leftDeltaY =
+                    left.inputBottom.y - leftTopY;
 
-                PointF leftPoint = BandCorrectionMath.lerp(left.inputTop, left.inputBottom, v);
-                PointF rightPoint = BandCorrectionMath.lerp(right.inputTop, right.inputBottom, v);
+            float rightTopX = right.inputTop.x;
+            float rightTopY = right.inputTop.y;
+            float rightDeltaX =
+                    right.inputBottom.x - rightTopX;
+            float rightDeltaY =
+                    right.inputBottom.y - rightTopY;
+
+            for (int y = 0; y < outputHeight; y++) {
+                float v =
+                        outputHeight == 1
+                                ? 0f
+                                : y / (float) (outputHeight - 1);
+
+                float leftX =
+                        leftTopX + leftDeltaX * v;
+                float leftY =
+                        leftTopY + leftDeltaY * v;
+                float rowDeltaX =
+                        rightTopX
+                                + rightDeltaX * v
+                                - leftX;
+                float rowDeltaY =
+                        rightTopY
+                                + rightDeltaY * v
+                                - leftY;
+
+                int outputRowOffset =
+                        y * outputWidth;
 
                 for (int x = xStart; x < xEnd; x++) {
-                    float u = ((x + 0.5f) - leftOutputX) / bandWidth;
-                    u = BandCorrectionMath.clamp(u, 0f, 1f);
-
-                    PointF sourcePoint = BandCorrectionMath.lerp(leftPoint, rightPoint, u);
-
-                    int color = sampleBilinear(
-                            sourcePixels,
-                            sourceWidth,
-                            sourceHeight,
-                            sourcePoint.x,
-                            sourcePoint.y
+                    float u =
+                            ((x + 0.5f) - leftOutputX)
+                                    / bandWidth;
+                    u = BandCorrectionMath.clamp(
+                            u,
+                            0f,
+                            1f
                     );
 
-                    outputPixels[y * outputWidth + x] = color;
+                    float sourceX =
+                            leftX + rowDeltaX * u;
+                    float sourceY =
+                            leftY + rowDeltaY * u;
+
+                    outputPixels[outputRowOffset + x] =
+                            sampleBilinear(
+                                    sourcePixels,
+                                    sourceWidth,
+                                    sourceHeight,
+                                    sourceX,
+                                    sourceY
+                            );
                 }
             }
         }
 
-        result.setPixels(outputPixels, 0, outputWidth, 0, 0, outputWidth, outputHeight);
+        result.setPixels(
+                outputPixels,
+                0,
+                outputWidth,
+                0,
+                0,
+                outputWidth,
+                outputHeight
+        );
+
         return result;
     }
 
@@ -102,11 +187,19 @@ public class ScanlineBandRenderer implements BandRenderer {
             float x,
             float y
     ) {
-        x = BandCorrectionMath.clamp(x, 0f, width - 1f);
-        y = BandCorrectionMath.clamp(y, 0f, height - 1f);
+        x = BandCorrectionMath.clamp(
+                x,
+                0f,
+                width - 1f
+        );
+        y = BandCorrectionMath.clamp(
+                y,
+                0f,
+                height - 1f
+        );
 
-        int x0 = (int) Math.floor(x);
-        int y0 = (int) Math.floor(y);
+        int x0 = (int) x;
+        int y0 = (int) y;
         int x1 = Math.min(x0 + 1, width - 1);
         int y1 = Math.min(y0 + 1, height - 1);
 
@@ -118,10 +211,38 @@ public class ScanlineBandRenderer implements BandRenderer {
         int c01 = pixels[y1 * width + x0];
         int c11 = pixels[y1 * width + x1];
 
-        int a = bilerp(Color.alpha(c00), Color.alpha(c10), Color.alpha(c01), Color.alpha(c11), tx, ty);
-        int r = bilerp(Color.red(c00), Color.red(c10), Color.red(c01), Color.red(c11), tx, ty);
-        int g = bilerp(Color.green(c00), Color.green(c10), Color.green(c01), Color.green(c11), tx, ty);
-        int b = bilerp(Color.blue(c00), Color.blue(c10), Color.blue(c01), Color.blue(c11), tx, ty);
+        int a = bilerp(
+                Color.alpha(c00),
+                Color.alpha(c10),
+                Color.alpha(c01),
+                Color.alpha(c11),
+                tx,
+                ty
+        );
+        int r = bilerp(
+                Color.red(c00),
+                Color.red(c10),
+                Color.red(c01),
+                Color.red(c11),
+                tx,
+                ty
+        );
+        int g = bilerp(
+                Color.green(c00),
+                Color.green(c10),
+                Color.green(c01),
+                Color.green(c11),
+                tx,
+                ty
+        );
+        int b = bilerp(
+                Color.blue(c00),
+                Color.blue(c10),
+                Color.blue(c01),
+                Color.blue(c11),
+                tx,
+                ty
+        );
 
         return Color.argb(a, r, g, b);
     }
@@ -134,9 +255,14 @@ public class ScanlineBandRenderer implements BandRenderer {
             float tx,
             float ty
     ) {
-        float top = c00 + (c10 - c00) * tx;
-        float bottom = c01 + (c11 - c01) * tx;
-        return Math.round(top + (bottom - top) * ty);
+        float top =
+                c00 + (c10 - c00) * tx;
+        float bottom =
+                c01 + (c11 - c01) * tx;
+
+        return Math.round(
+                top + (bottom - top) * ty
+        );
     }
 
     private void fillBand(
@@ -147,12 +273,22 @@ public class ScanlineBandRenderer implements BandRenderer {
             int xEnd,
             int color
     ) {
-        xStart = BandCorrectionMath.clamp(xStart, 0, width);
-        xEnd = BandCorrectionMath.clamp(xEnd, 0, width);
+        xStart = BandCorrectionMath.clamp(
+                xStart,
+                0,
+                width
+        );
+        xEnd = BandCorrectionMath.clamp(
+                xEnd,
+                0,
+                width
+        );
 
         for (int y = 0; y < height; y++) {
+            int rowOffset = y * width;
+
             for (int x = xStart; x < xEnd; x++) {
-                pixels[y * width + x] = color;
+                pixels[rowOffset + x] = color;
             }
         }
     }
