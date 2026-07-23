@@ -62,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     private Button saveButton;
     private SwitchCompat outputBoundarySwitch;
 
+    private Uri selectedImageUri;
     private Bitmap sourceBitmap;
     private Bitmap correctedBitmap;
 
@@ -82,23 +83,21 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
 
-                        try (InputStream inputStream =
-                                     getContentResolver().openInputStream(uri)) {
-                            sourceBitmap = BitmapFactory.decodeStream(inputStream);
-                            correctedBitmap = null;
+                        try {
+                            Bitmap selectedBitmap =
+                                    loadBitmapFromUri(uri);
 
-                            if (sourceBitmap == null) {
-                                Toast.makeText(
-                                        this,
-                                        "画像を読み込めませんでした",
-                                        Toast.LENGTH_SHORT
-                                ).show();
-                                return;
-                            }
+                            selectedImageUri = uri;
+                            sourceBitmap = selectedBitmap;
+                            correctedBitmap = null;
 
                             nextBoundaryId = 1L;
                             outputAspectRatio = Float.NaN;
-                            cornerEditView = new CornerEditView(this, sourceBitmap);
+                            cornerEditView =
+                                    new CornerEditView(
+                                            this,
+                                            sourceBitmap
+                                    );
                             showCornerEditView();
                         } catch (Exception e) {
                             Toast.makeText(
@@ -358,6 +357,7 @@ public class MainActivity extends AppCompatActivity {
     private void requestSaveCurrentResult() {
         if (!showingResult
                 || correctedBitmap == null
+                || selectedImageUri == null
                 || sourceBitmap == null
                 || cornerEditView == null) {
             Toast.makeText(
@@ -414,32 +414,80 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private Bitmap createSaveBitmap() {
-        PageCorners corners = cornerEditView.getPageCorners();
-        List<BoundaryPair> boundaryPairs =
-                cornerEditView.getBoundaryPairs();
+    private Bitmap createSaveBitmap() throws IOException {
+        Bitmap saveSourceBitmap =
+                loadBitmapFromUri(selectedImageUri);
 
-        if (Float.isNaN(outputAspectRatio)
-                || Float.isInfinite(outputAspectRatio)
-                || outputAspectRatio <= 0f) {
-            outputAspectRatio =
-                    BandCorrectionMath.estimateAspectRatio(corners);
+        try {
+            validateSaveSourceDimensions(saveSourceBitmap);
+
+            PageCorners corners =
+                    cornerEditView.getPageCorners();
+            List<BoundaryPair> boundaryPairs =
+                    cornerEditView.getBoundaryPairs();
+
+            if (Float.isNaN(outputAspectRatio)
+                    || Float.isInfinite(outputAspectRatio)
+                    || outputAspectRatio <= 0f) {
+                outputAspectRatio =
+                        BandCorrectionMath.estimateAspectRatio(corners);
+            }
+
+            OutputSettings settings =
+                    createSaveOutputSettings(corners);
+
+            BandCorrectionEngine engine =
+                    new BandCorrectionEngine(
+                            new ScanlineBandRenderer()
+                    );
+
+            return engine.createResult(
+                    saveSourceBitmap,
+                    corners,
+                    boundaryPairs,
+                    settings
+            );
+        } finally {
+            if (!saveSourceBitmap.isRecycled()) {
+                saveSourceBitmap.recycle();
+            }
         }
+    }
 
-        OutputSettings settings =
-                createSaveOutputSettings(corners);
-
-        BandCorrectionEngine engine =
-                new BandCorrectionEngine(
-                        new ScanlineBandRenderer()
+    private Bitmap loadBitmapFromUri(
+            Uri imageUri
+    ) throws IOException {
+        try (InputStream inputStream =
+                     getContentResolver().openInputStream(imageUri)) {
+            if (inputStream == null) {
+                throw new IOException(
+                        "画像の入力ストリームを開けませんでした"
                 );
+            }
 
-        return engine.createResult(
-                sourceBitmap,
-                corners,
-                boundaryPairs,
-                settings
-        );
+            Bitmap bitmap =
+                    BitmapFactory.decodeStream(inputStream);
+            if (bitmap == null) {
+                throw new IOException(
+                        "画像をBitmapとして読み込めませんでした"
+                );
+            }
+
+            return bitmap;
+        }
+    }
+
+    private void validateSaveSourceDimensions(
+            Bitmap saveSourceBitmap
+    ) throws IOException {
+        if (saveSourceBitmap.getWidth()
+                != sourceBitmap.getWidth()
+                || saveSourceBitmap.getHeight()
+                != sourceBitmap.getHeight()) {
+            throw new IOException(
+                    "保存時に再読込した画像サイズが編集時と一致しません"
+            );
+        }
     }
 
     private OutputSettings createSaveOutputSettings(
