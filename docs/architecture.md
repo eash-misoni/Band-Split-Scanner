@@ -156,9 +156,15 @@ com.example.bandsplitscanner
 - ドラッグ終了時に補正プレビューを再生成する
 - 保存ボタンの表示状態と有効状態を管理する
 - Android 9以前のWRITE_EXTERNAL_STORAGE権限要求を行う
-- correctedBitmapをJPEG品質95で圧縮する
+- 現在のPageCorners・BoundaryPair・outputAspectRatioを保存入力として取得する
+- ページ上辺・下辺の平均幅から保存用OutputSettingsを生成する
+- 最大400万画素・長辺4096px以内へ保存サイズを制限する
+- sourceBitmapから保存用Bitmapを再生成する
+- 保存用BitmapをJPEG品質95で圧縮する
 - MediaStoreへ保存し、Android 10以降ではPictures/BandSplitScannerへ公開する
-- 保存成功・失敗をToastで通知する
+- 保存成功・失敗・メモリ不足をToastで通知する
+- 保存完了時に実際の出力サイズを表示する
+- 保存後に一時的な保存用Bitmapを解放する
 ```
 
 境界追加時には、新しい `outputX` の左右に隣接する境界を求め、入力側の上端点と下端点をそれぞれ線形補間して、新しい `BoundaryPair` を生成する。
@@ -779,14 +785,20 @@ imageRect.top    <= viewHeight - minimumVisibleHeight
 
 ### 7.10 補正結果の保存
 
-現在の最小保存経路は以下。
+現在の保存経路は以下。
 
 ```text
 ユーザーが保存ボタンを押す
 ↓
 MainActivity
 ↓
-現在のcorrectedBitmapを取得
+PageCorners・BoundaryPair・outputAspectRatioを取得
+↓
+保存用OutputSettingsを生成
+↓
+BandCorrectionEngine
+↓
+sourceBitmapから保存用Bitmapを再生成
 ↓
 JPEG品質95で圧縮
 ↓
@@ -798,9 +810,35 @@ Android 10以降
 ↓
 Android 9以前
 └ WRITE_EXTERNAL_STORAGE権限を確認して保存
+↓
+保存用Bitmapを解放
 ```
 
-保存対象は `correctedBitmap` だけであり、`ResultPreviewView` のCanvasへ描画している次の表示要素は保存対象に含めない。
+プレビュー補正は固定幅 `1200px` の `correctedBitmap` を使用する。
+
+保存用Bitmapはそれとは別に生成し、次の基準で出力サイズを決める。
+
+```text
+保存用出力幅
+= ページ上辺と下辺の画像座標上の長さの平均
+
+保存用出力高さ
+= 保存用出力幅 / outputAspectRatio
+```
+
+現行レンダラーのメモリ使用量を考慮し、保存サイズは次の上限内へ縮小する。
+
+```text
+SAVE_MAX_OUTPUT_PIXELS
+= 4,000,000
+
+SAVE_MAX_OUTPUT_EDGE
+= 4096
+```
+
+保存用Bitmapはローカル変数として処理中だけ保持し、保存完了・失敗にかかわらず `finally` で解放する。
+
+`ResultPreviewView` のCanvasへ描画している次の表示要素は保存対象に含めない。
 
 ```text
 - 出力境界線
@@ -812,7 +850,9 @@ Android 9以前
 
 保存途中で失敗した場合は、挿入済みのMediaStore項目を削除する。
 
-この経路は保存方法を検証するための暫定実装であり、保存画像は幅 `1200px` のプレビュー用 `correctedBitmap` である。保存時の高解像度再生成は別段階で実装する。
+`OutOfMemoryError` は一般の保存失敗と区別し、保存画像生成時のメモリ不足として通知する。
+
+現時点では、保存用補正の入力にも、画像選択時に読み込んだ `sourceBitmap` を使用する。`selectedImageUri` から保存用Bitmapを再読込する処理は未実装。
 
 ---
 
@@ -1050,15 +1090,29 @@ source(u, v)
 MainActivity
 ├ sourceBitmap
 └ correctedBitmap
+
+保存処理中のローカル変数
+└ saveBitmap
 ```
 
-画像選択時に原画像をBitmapへ読み込んでいる。
+画像選択時にURIから `sourceBitmap` を読み込むが、URI自体は主状態として保持していない。
 
 補正結果の確認時には、幅 `1200px` の `correctedBitmap` を生成する。
 
-現在の保存処理は、この `correctedBitmap` をMainActivityがJPEGへ圧縮してMediaStoreへ保存する。
+保存時には、現在の編集状態と `sourceBitmap` から保存用Bitmapを別途再生成する。
 
-これは保存経路を確認する検証版として許容するが、プレビュー表示用Bitmapと最終保存用Bitmapはまだ分離されていない。
+```text
+sourceBitmap
++ PageCorners
++ BoundaryPair
++ outputAspectRatio
+↓
+saveBitmap
+```
+
+このため、プレビュー表示用Bitmapと保存用補正結果Bitmapは分離された。
+
+ただし、入力側は同じ `sourceBitmap` を共用しており、保存時にURIからより適切な解像度で再読込する構成にはなっていない。
 
 ---
 
@@ -1191,15 +1245,17 @@ View同士を直接同期元にしない。
 
 現在のMainActivity中心構成を維持したまま、MVP操作を完成させる。
 
-境界追加・削除、補正前・補正後画面のズーム・パン、両画面の最低48dp可視制約、出力境界線表示切り替え、出力外枠表示、View端に依存しない左右辺ドラッグによる縦横比変更、現在のプレビュー用補正BitmapのMediaStore保存は実装済み。
+境界追加・削除、補正前・補正後画面のズーム・パン、両画面の最低48dp可視制約、出力境界線表示切り替え、出力外枠表示、View端に依存しない左右辺ドラッグによる縦横比変更、現在の編集状態からの保存用Bitmap再生成とMediaStore保存は実装済み。
 
 残る主な作業は以下。
 
 ```text
-- 保存時の保存用Bitmap再生成
+- selectedImageUriの保持
+- 保存時のURIからの再読込
 - 必要に応じた低解像度プレビュー生成
-- 保存用高解像度画像の再読込
+- プレビュー画像座標と原画像座標の変換
 - 画像入出力責務の分離
+- 保存処理のバックグラウンド実行
 - 状態管理の段階的な分離
 ```
 
@@ -1382,6 +1438,19 @@ View座標は端末サイズ、向き、ズーム、パンで変化する。
 → 新しいOutputSettingsで補正画像を再生成
 ```
 
+保存処理では、プレビュー表示用Bitmapと保存用Bitmapを分ける。
+
+```text
+結果確認
+→ 幅1200pxのcorrectedBitmap
+
+保存
+→ 現在の編集状態からsaveBitmapを別途生成
+→ 保存後にsaveBitmapを解放
+```
+
+現時点では保存処理を同期実行しているため、画像入出力責務を分離する段階でバックグラウンド処理へ移す。
+
 ---
 
 ## 18. 現在の設計上の評価
@@ -1405,9 +1474,13 @@ View座標は端末サイズ、向き、ズーム、パンで変化する。
 - 補正後Bitmap、出力境界線、出力外枠へ共通の表示変換を適用できている
 - 出力外枠の操作範囲をView端から分離し、縦横比制約だけで決定できている
 - 補正Bitmapと編集用オーバーレイを分離したままMediaStoreへ保存できている
-- Androidのバージョン差を考慮した最小保存経路を確認できている
+- プレビュー用correctedBitmapと保存用Bitmapを分離できている
+- 現在の編集状態から保存用Bitmapを再生成できている
+- 保存出力サイズへ画素数と長辺の上限を適用できている
+- 保存後に一時Bitmapを解放できている
+- Androidのバージョン差を考慮した保存経路を確認できている
 ```
 
-今後の大きな設計課題は、MainActivityとCornerEditViewに集中している状態管理と、MainActivityへ追加された画像保存責務を、高解像度画像対応・撮影・画面分割のタイミングで段階的に外へ出すことである。
+今後の大きな設計課題は、MainActivityとCornerEditViewに集中している状態管理と、MainActivityへ追加された画像読込・保存責務を、URI再読込・縮小プレビュー・撮影・画面分割のタイミングで段階的に外へ出すことである。
 
-現段階では、最終構成への一括リファクタリングより、保存用Bitmapの再生成、プレビュー用画像・保存用画像の分離、ImageLoader / ImageSaverへの画像入出力分離を検証しながら、必要な単位で責務分離を進める。
+現段階では、最終構成への一括リファクタリングより、`selectedImageUri` の保持、保存時のURI再読込、プレビュー画像座標と原画像座標の対応、ImageLoader / ImageSaverへの画像入出力分離を検証しながら、必要な単位で責務分離を進める。
