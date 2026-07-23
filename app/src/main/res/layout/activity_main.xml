@@ -26,15 +26,15 @@
         android:layout_gravity="end"
         android:layout_marginStart="12dp"
         android:layout_marginEnd="12dp"
-        android:text="@string/show_output_boundary_lines"
         android:checked="true"
+        android:text="@string/show_output_boundary_lines"
         android:visibility="gone" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="12dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:padding="12dp">
 
         <Button
             android:id="@+id/selectButton"
@@ -56,6 +56,14 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="戻る" />
+
+        <Button
+            android:id="@+id/saveButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="保存"
+            android:visibility="gone" />
 
     </LinearLayout>
 
