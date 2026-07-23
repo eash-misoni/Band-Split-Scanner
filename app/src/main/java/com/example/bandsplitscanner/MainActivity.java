@@ -49,6 +49,8 @@ import java.util.Locale;
 public class MainActivity extends AppCompatActivity {
 
     private static final int PREVIEW_OUTPUT_WIDTH = 1200;
+    private static final long SAVE_MAX_OUTPUT_PIXELS = 4_000_000L;
+    private static final int SAVE_MAX_OUTPUT_EDGE = 4096;
     private static final int SAVE_JPEG_QUALITY = 95;
     private static final String SAVE_DIRECTORY_NAME = "BandSplitScanner";
     private static final String SAVE_FILENAME_PATTERN = "yyyyMMdd_HHmmss";
@@ -113,7 +115,7 @@ public class MainActivity extends AppCompatActivity {
                     new ActivityResultContracts.RequestPermission(),
                     isGranted -> {
                         if (isGranted) {
-                            saveCorrectedBitmapToMediaStore();
+                            saveCurrentResult();
                         } else {
                             Toast.makeText(
                                     this,
@@ -354,7 +356,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void requestSaveCurrentResult() {
-        if (!showingResult || correctedBitmap == null) {
+        if (!showingResult
+                || correctedBitmap == null
+                || sourceBitmap == null
+                || cornerEditView == null) {
             Toast.makeText(
                     this,
                     "保存する補正結果がありません",
@@ -374,17 +379,134 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        saveCorrectedBitmapToMediaStore();
+        saveCurrentResult();
     }
 
-    private void saveCorrectedBitmapToMediaStore() {
-        Bitmap bitmapToSave = correctedBitmap;
-        if (bitmapToSave == null) {
-            return;
-        }
-
+    private void saveCurrentResult() {
+        Bitmap bitmapToSave = null;
         saveButton.setEnabled(false);
 
+        try {
+            bitmapToSave = createSaveBitmap();
+            saveBitmapToMediaStore(bitmapToSave);
+            showSaveCompletedMessage(bitmapToSave);
+        } catch (OutOfMemoryError e) {
+            Toast.makeText(
+                    this,
+                    "保存画像を生成するためのメモリが不足しました",
+                    Toast.LENGTH_LONG
+            ).show();
+        } catch (Exception e) {
+            Toast.makeText(
+                    this,
+                    "画像の保存に失敗しました",
+                    Toast.LENGTH_SHORT
+            ).show();
+        } finally {
+            if (bitmapToSave != null
+                    && !bitmapToSave.isRecycled()) {
+                bitmapToSave.recycle();
+            }
+
+            saveButton.setEnabled(
+                    showingResult && correctedBitmap != null
+            );
+        }
+    }
+
+    private Bitmap createSaveBitmap() {
+        PageCorners corners = cornerEditView.getPageCorners();
+        List<BoundaryPair> boundaryPairs =
+                cornerEditView.getBoundaryPairs();
+
+        if (Float.isNaN(outputAspectRatio)
+                || Float.isInfinite(outputAspectRatio)
+                || outputAspectRatio <= 0f) {
+            outputAspectRatio =
+                    BandCorrectionMath.estimateAspectRatio(corners);
+        }
+
+        OutputSettings settings =
+                createSaveOutputSettings(corners);
+
+        BandCorrectionEngine engine =
+                new BandCorrectionEngine(
+                        new ScanlineBandRenderer()
+                );
+
+        return engine.createResult(
+                sourceBitmap,
+                corners,
+                boundaryPairs,
+                settings
+        );
+    }
+
+    private OutputSettings createSaveOutputSettings(
+            PageCorners corners
+    ) {
+        float topWidth =
+                BandCorrectionMath.distance(
+                        corners.topLeft,
+                        corners.topRight
+                );
+        float bottomWidth =
+                BandCorrectionMath.distance(
+                        corners.bottomLeft,
+                        corners.bottomRight
+                );
+
+        int outputWidth = Math.max(
+                1,
+                Math.round((topWidth + bottomWidth) / 2f)
+        );
+        int outputHeight = Math.max(
+                1,
+                Math.round(outputWidth / outputAspectRatio)
+        );
+
+        float scale = 1f;
+        int longestEdge = Math.max(outputWidth, outputHeight);
+
+        if (longestEdge > SAVE_MAX_OUTPUT_EDGE) {
+            scale = Math.min(
+                    scale,
+                    SAVE_MAX_OUTPUT_EDGE / (float) longestEdge
+            );
+        }
+
+        long outputPixels =
+                (long) outputWidth * outputHeight;
+        if (outputPixels > SAVE_MAX_OUTPUT_PIXELS) {
+            scale = Math.min(
+                    scale,
+                    (float) Math.sqrt(
+                            SAVE_MAX_OUTPUT_PIXELS
+                                    / (double) outputPixels
+                    )
+            );
+        }
+
+        if (scale < 1f) {
+            outputWidth = Math.max(
+                    1,
+                    Math.round(outputWidth * scale)
+            );
+            outputHeight = Math.max(
+                    1,
+                    Math.round(outputHeight * scale)
+            );
+        }
+
+        return new OutputSettings(
+                outputWidth,
+                outputHeight
+        );
+    }
+
+    private void saveBitmapToMediaStore(
+            Bitmap bitmapToSave
+    ) throws IOException {
         ContentResolver resolver = getContentResolver();
         Uri imageUri = null;
 
@@ -470,23 +592,15 @@ public class MainActivity extends AppCompatActivity {
                     );
                 }
             }
-
-            String savedMessage;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                savedMessage =
-                        "Pictures/"
-                                + SAVE_DIRECTORY_NAME
-                                + " に保存しました";
-            } else {
-                savedMessage =
-                        "端末の画像ライブラリに保存しました";
+        } catch (OutOfMemoryError e) {
+            if (imageUri != null) {
+                resolver.delete(
+                        imageUri,
+                        null,
+                        null
+                );
             }
-
-            Toast.makeText(
-                    this,
-                    savedMessage,
-                    Toast.LENGTH_LONG
-            ).show();
+            throw e;
         } catch (Exception e) {
             if (imageUri != null) {
                 resolver.delete(
@@ -496,16 +610,38 @@ public class MainActivity extends AppCompatActivity {
                 );
             }
 
-            Toast.makeText(
-                    this,
+            if (e instanceof IOException) {
+                throw (IOException) e;
+            }
+            throw new IOException(
                     "画像の保存に失敗しました",
-                    Toast.LENGTH_SHORT
-            ).show();
-        } finally {
-            saveButton.setEnabled(
-                    showingResult && correctedBitmap != null
+                    e
             );
         }
+    }
+
+    private void showSaveCompletedMessage(
+            Bitmap savedBitmap
+    ) {
+        String saveLocation;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            saveLocation =
+                    "Pictures/" + SAVE_DIRECTORY_NAME;
+        } else {
+            saveLocation =
+                    "端末の画像ライブラリ";
+        }
+
+        Toast.makeText(
+                this,
+                saveLocation
+                        + " に "
+                        + savedBitmap.getWidth()
+                        + " × "
+                        + savedBitmap.getHeight()
+                        + " px で保存しました",
+                Toast.LENGTH_LONG
+        ).show();
     }
 
     private void applyOutputXFromWidthBar(BoundaryMarker marker) {
