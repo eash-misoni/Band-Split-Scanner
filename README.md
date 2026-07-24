@@ -1,4 +1,12 @@
 # Band Split Scanner
+補正前</br>
+<img width="500" height="300" alt="補正前" src="https://github.com/user-attachments/assets/cfd93a17-8658-4428-800a-329065f38db0" /></br>
+補正後</br>
+<img width="500" height="300" alt="補正後" src="https://github.com/user-attachments/assets/4d3c8f5d-2291-446f-9e4a-d26059fa0c78" /></br>
+画像編集画面1</br>
+<img width="500" height="300" alt="編集中1" src="https://github.com/user-attachments/assets/0a77fb02-4174-48c7-9266-698307579d89" /></br>
+画像編集画面2</br>
+<img width="500" height="300" alt="編集中2" src="https://github.com/user-attachments/assets/d1ba9176-41c1-46cb-aa30-485ce619b521" /></br>
 
 本のページなど、横方向に湾曲した紙面を複数の帯へ分割し、帯ごとに補正して1枚の画像へ連結するAndroidアプリです。
 
