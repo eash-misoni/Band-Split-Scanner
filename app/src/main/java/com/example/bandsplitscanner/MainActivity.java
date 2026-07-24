@@ -5,7 +5,6 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.PointF;
 import android.net.Uri;
 import android.os.Build;
@@ -30,6 +29,7 @@ import androidx.core.view.WindowInsetsCompat;
 import com.example.bandsplitscanner.correction.BandCorrectionEngine;
 import com.example.bandsplitscanner.correction.BandCorrectionMath;
 import com.example.bandsplitscanner.correction.ScanlineBandRenderer;
+import com.example.bandsplitscanner.image.ImageLoader;
 import com.example.bandsplitscanner.model.BoundaryMarker;
 import com.example.bandsplitscanner.model.BoundaryPair;
 import com.example.bandsplitscanner.model.OutputSettings;
@@ -39,7 +39,6 @@ import com.example.bandsplitscanner.view.ResultPreviewView;
 import com.example.bandsplitscanner.view.WidthDistributionBarView;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -58,6 +57,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int SAVE_JPEG_QUALITY = 95;
     private static final String SAVE_DIRECTORY_NAME = "BandSplitScanner";
     private static final String SAVE_FILENAME_PATTERN = "yyyyMMdd_HHmmss";
+
+    private ImageLoader imageLoader;
 
     private FrameLayout imageContainer;
     private Button selectButton;
@@ -94,23 +95,19 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         try {
-                            BitmapFactory.Options imageBounds =
-                                    readBitmapBounds(uri);
-                            int previewInSampleSize =
-                                    calculatePreviewInSampleSize(
-                                            imageBounds.outWidth,
-                                            imageBounds.outHeight
-                                    );
-                            Bitmap selectedBitmap =
-                                    loadBitmapFromUri(
+                            ImageLoader.LoadedImage loadedImage =
+                                    imageLoader.loadPreview(
                                             uri,
-                                            previewInSampleSize
+                                            PREVIEW_SOURCE_MAX_EDGE
                                     );
 
                             selectedImageUri = uri;
-                            selectedImageWidth = imageBounds.outWidth;
-                            selectedImageHeight = imageBounds.outHeight;
-                            sourceBitmap = selectedBitmap;
+                            selectedImageWidth =
+                                    loadedImage.originalWidth;
+                            selectedImageHeight =
+                                    loadedImage.originalHeight;
+                            sourceBitmap =
+                                    loadedImage.bitmap;
                             correctedBitmap = null;
 
                             nextBoundaryId = 1L;
@@ -152,6 +149,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
+        imageLoader =
+                new ImageLoader(getContentResolver());
 
         ViewCompat.setOnApplyWindowInsetsListener(
                 findViewById(R.id.rootLayout),
@@ -539,9 +539,8 @@ public class MainActivity extends AppCompatActivity {
             SaveRequest saveRequest
     ) throws IOException {
         Bitmap saveSourceBitmap =
-                loadBitmapFromUri(
-                        saveRequest.imageUri,
-                        1
+                imageLoader.loadOriginal(
+                        saveRequest.imageUri
                 );
 
         try {
@@ -603,87 +602,6 @@ public class MainActivity extends AppCompatActivity {
             if (!saveSourceBitmap.isRecycled()) {
                 saveSourceBitmap.recycle();
             }
-        }
-    }
-
-    private BitmapFactory.Options readBitmapBounds(
-            Uri imageUri
-    ) throws IOException {
-        BitmapFactory.Options options =
-                new BitmapFactory.Options();
-        options.inJustDecodeBounds = true;
-
-        try (InputStream inputStream =
-                     getContentResolver().openInputStream(imageUri)) {
-            if (inputStream == null) {
-                throw new IOException(
-                        "画像の入力ストリームを開けませんでした"
-                );
-            }
-
-            BitmapFactory.decodeStream(
-                    inputStream,
-                    null,
-                    options
-            );
-        }
-
-        if (options.outWidth <= 0
-                || options.outHeight <= 0) {
-            throw new IOException(
-                    "画像サイズを取得できませんでした"
-            );
-        }
-
-        return options;
-    }
-
-    private int calculatePreviewInSampleSize(
-            int imageWidth,
-            int imageHeight
-    ) {
-        int inSampleSize = 1;
-        int longestEdge =
-                Math.max(imageWidth, imageHeight);
-
-        while (longestEdge / inSampleSize
-                > PREVIEW_SOURCE_MAX_EDGE) {
-            inSampleSize *= 2;
-        }
-
-        return inSampleSize;
-    }
-
-    private Bitmap loadBitmapFromUri(
-            Uri imageUri,
-            int inSampleSize
-    ) throws IOException {
-        BitmapFactory.Options options =
-                new BitmapFactory.Options();
-        options.inSampleSize =
-                Math.max(1, inSampleSize);
-
-        try (InputStream inputStream =
-                     getContentResolver().openInputStream(imageUri)) {
-            if (inputStream == null) {
-                throw new IOException(
-                        "画像の入力ストリームを開けませんでした"
-                );
-            }
-
-            Bitmap bitmap =
-                    BitmapFactory.decodeStream(
-                            inputStream,
-                            null,
-                            options
-                    );
-            if (bitmap == null) {
-                throw new IOException(
-                        "画像をBitmapとして読み込めませんでした"
-                );
-            }
-
-            return bitmap;
         }
     }
 
