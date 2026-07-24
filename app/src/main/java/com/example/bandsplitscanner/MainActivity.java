@@ -1,16 +1,12 @@
 package com.example.bandsplitscanner;
 
 import android.Manifest;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.PointF;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.MediaStore;
 import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -30,6 +26,7 @@ import com.example.bandsplitscanner.correction.BandCorrectionEngine;
 import com.example.bandsplitscanner.correction.BandCorrectionMath;
 import com.example.bandsplitscanner.correction.ScanlineBandRenderer;
 import com.example.bandsplitscanner.image.ImageLoader;
+import com.example.bandsplitscanner.image.ImageSaver;
 import com.example.bandsplitscanner.model.BoundaryMarker;
 import com.example.bandsplitscanner.model.BoundaryPair;
 import com.example.bandsplitscanner.model.OutputSettings;
@@ -39,7 +36,6 @@ import com.example.bandsplitscanner.view.ResultPreviewView;
 import com.example.bandsplitscanner.view.WidthDistributionBarView;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -59,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String SAVE_FILENAME_PATTERN = "yyyyMMdd_HHmmss";
 
     private ImageLoader imageLoader;
+    private ImageSaver imageSaver;
 
     private FrameLayout imageContainer;
     private Button selectButton;
@@ -152,6 +149,8 @@ public class MainActivity extends AppCompatActivity {
 
         imageLoader =
                 new ImageLoader(getContentResolver());
+        imageSaver =
+                new ImageSaver(getContentResolver());
 
         ViewCompat.setOnApplyWindowInsetsListener(
                 findViewById(R.id.rootLayout),
@@ -452,7 +451,12 @@ public class MainActivity extends AppCompatActivity {
         try {
             bitmapToSave =
                     createSaveBitmap(saveRequest);
-            saveBitmapToMediaStore(bitmapToSave);
+            imageSaver.saveJpeg(
+                    bitmapToSave,
+                    SAVE_JPEG_QUALITY,
+                    SAVE_DIRECTORY_NAME,
+                    createSaveDisplayName()
+            );
 
             int savedWidth =
                     bitmapToSave.getWidth();
@@ -737,120 +741,16 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
-    private void saveBitmapToMediaStore(
-            Bitmap bitmapToSave
-    ) throws IOException {
-        ContentResolver resolver = getContentResolver();
-        Uri imageUri = null;
+    private String createSaveDisplayName() {
+        String timestamp =
+                new SimpleDateFormat(
+                        SAVE_FILENAME_PATTERN,
+                        Locale.US
+                ).format(new Date());
 
-        try {
-            String timestamp =
-                    new SimpleDateFormat(
-                            SAVE_FILENAME_PATTERN,
-                            Locale.US
-                    ).format(new Date());
-            String displayName =
-                    "BandSplitScanner_" + timestamp + ".jpg";
-
-            ContentValues values = new ContentValues();
-            values.put(
-                    MediaStore.Images.Media.DISPLAY_NAME,
-                    displayName
-            );
-            values.put(
-                    MediaStore.Images.Media.MIME_TYPE,
-                    "image/jpeg"
-            );
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.put(
-                        MediaStore.Images.Media.RELATIVE_PATH,
-                        Environment.DIRECTORY_PICTURES
-                                + "/"
-                                + SAVE_DIRECTORY_NAME
-                );
-                values.put(
-                        MediaStore.Images.Media.IS_PENDING,
-                        1
-                );
-            }
-
-            imageUri = resolver.insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    values
-            );
-            if (imageUri == null) {
-                throw new IOException(
-                        "MediaStoreへの登録に失敗しました"
-                );
-            }
-
-            try (OutputStream outputStream =
-                         resolver.openOutputStream(imageUri)) {
-                if (outputStream == null) {
-                    throw new IOException(
-                            "保存先を開けませんでした"
-                    );
-                }
-
-                boolean compressed = bitmapToSave.compress(
-                        Bitmap.CompressFormat.JPEG,
-                        SAVE_JPEG_QUALITY,
-                        outputStream
-                );
-                if (!compressed) {
-                    throw new IOException(
-                            "JPEGへの変換に失敗しました"
-                    );
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ContentValues publishValues =
-                        new ContentValues();
-                publishValues.put(
-                        MediaStore.Images.Media.IS_PENDING,
-                        0
-                );
-
-                int updatedRows = resolver.update(
-                        imageUri,
-                        publishValues,
-                        null,
-                        null
-                );
-                if (updatedRows == 0) {
-                    throw new IOException(
-                            "保存画像を公開できませんでした"
-                    );
-                }
-            }
-        } catch (OutOfMemoryError e) {
-            if (imageUri != null) {
-                resolver.delete(
-                        imageUri,
-                        null,
-                        null
-                );
-            }
-            throw e;
-        } catch (Exception e) {
-            if (imageUri != null) {
-                resolver.delete(
-                        imageUri,
-                        null,
-                        null
-                );
-            }
-
-            if (e instanceof IOException) {
-                throw (IOException) e;
-            }
-            throw new IOException(
-                    "画像の保存に失敗しました",
-                    e
-            );
-        }
+        return "BandSplitScanner_"
+                + timestamp
+                + ".jpg";
     }
 
     private void showSaveCompletedMessage(
